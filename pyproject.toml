@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "market-predict"
+version = "0.1.0"
+description = "Ticker-centric market context: spot + options walls + prediction-market distribution + Fed path"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Yicheng (Ethan) Yang" }]
+keywords = ["finance", "options", "prediction-markets", "kalshi", "fomc"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "yfinance>=1.1.0",
+    "requests>=2.31.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1.0"]
+
+[project.scripts]
+market-predict = "market_predict.cli:main"
+
+[project.urls]
+Repository = "https://github.com/YichengYang-Ethan/market-predict"
+
+[tool.hatch.build.targets.wheel]
+packages = ["market_predict"]
