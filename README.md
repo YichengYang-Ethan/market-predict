@@ -19,6 +19,22 @@ Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data 
 
 Every Kalshi/Polymarket panel cites event ticker + close date + 24h volume for traceability.
 
+## Performance
+
+| Path | Cold load | What runs |
+|---|---|---|
+| **Snapshot hit** (default) | ~1–3 s | Streamlit reads `data/snapshot_SPY.json` from disk and renders |
+| **Snapshot miss / stale** | ~13 s | Falls back to live fetch: 18 APIs in parallel via `ThreadPoolExecutor` |
+| **Serial fetch** (old) | ~108 s | What it was before the parallelization + snapshot pipeline |
+
+The footer of the page tells you which path served the current view.
+
+### How snapshots stay fresh
+
+A GitHub Actions cron (`.github/workflows/refresh-snapshot.yml`) runs every 15 minutes on a fresh runner — no Yahoo throttle, no Streamlit shared IP — calls `python -m market_predict.refresh_snapshot`, and commits the new `data/snapshot_*.json` files back to `main`. The same workflow `curl`s the Streamlit URL to keep the container warm and dodge the 12-hour idle spin-down. Public-repo Actions minutes are unlimited, so this is genuinely free.
+
+If the workflow ever stalls and the snapshot is over 30 minutes old, the Streamlit app silently falls back to a live fetch — no broken page.
+
 ## Quick start
 
 ```bash

@@ -1,0 +1,51 @@
+name: Refresh market snapshots
+
+on:
+  schedule:
+    # GitHub Actions cron is best-effort (often delayed 5-15 min under load).
+    # 15-min cadence gives ~1 commit/quarter-hour and stays well under the
+    # public-repo unlimited-minutes budget.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Build snapshots
+        run: python -m market_predict.refresh_snapshot
+
+      - name: Commit if changed
+        run: |
+          git config user.name "snapshot-bot"
+          git config user.email "snapshot-bot@users.noreply.github.com"
+          git add data/snapshot_*.json
+          if ! git diff --quiet --cached; then
+            git commit -m "snap: $(date -u +%FT%TZ)"
+            git push
+          else
+            echo "No snapshot diffs — skipping commit."
+          fi
+
+      - name: Ping Streamlit app to keep warm
+        run: |
+          curl -s -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
+            https://market-predict.streamlit.app/ || true

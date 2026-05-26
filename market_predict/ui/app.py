@@ -8,22 +8,41 @@ Run locally:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from market_predict.cli import build_view
+from market_predict.snapshot import load_snapshot
 from market_predict.tickers import TICKER_MAP, get_config
 from market_predict.ui import charts
 
 
 st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
 
+# Repo-root /data/snapshot_<sym>.json populated by the GitHub Actions cron.
+# If present and < 30 min old, we skip the 13-second live fetch entirely.
+SNAPSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+SNAPSHOT_MAX_AGE_SEC = 30 * 60
 
-# 15-min cache — Streamlit Cloud's shared instance means once one visitor
-# warms it, the next several get the page instantly. Prediction-market
-# probabilities don't move enough in 15 min to matter for context.
+
+# 15-min cache — once one visitor warms the shared Streamlit Cloud instance,
+# the next several get the page instantly.
 @st.cache_data(ttl=900, show_spinner=False)
 def load_view(symbol: str):
-    return build_view(symbol)
+    import time
+    snap_path = SNAPSHOT_DIR / f"snapshot_{symbol}.json"
+    if snap_path.exists():
+        age = time.time() - snap_path.stat().st_mtime
+        if age < SNAPSHOT_MAX_AGE_SEC:
+            snap = load_snapshot(snap_path)
+            if snap is not None:
+                snap._source = "snapshot"
+                return snap
+    # Live fetch fallback (slow path: ~13s)
+    view = build_view(symbol)
+    view._source = "live"
+    return view
 
 
 def _short_fed_outcome(question: str) -> str:
@@ -400,8 +419,13 @@ with tab_rates_2026:
         st.info("Polymarket 'rate cuts in 2026' event not found.")
 
 st.markdown("---")
+_ts = view.timestamp
+_ts_str = _ts.strftime("%Y-%m-%d %H:%M") if hasattr(_ts, "strftime") else str(_ts)[:16]
+_source_label = (
+    "📦 snapshot (refreshed every 15 min by GitHub Actions)"
+    if getattr(view, "_source", "live") == "snapshot"
+    else "🛰️ live fetch (Kalshi + Polymarket + yfinance)"
+)
 st.caption(
-    f"Last fetch · {view.timestamp:%Y-%m-%d %H:%M}  ·  "
-    f"sources · yfinance + Kalshi + Polymarket  ·  "
-    f"cache TTL · 15 min"
+    f"Data · {_ts_str}  ·  {_source_label}  ·  cache TTL · 15 min"
 )
