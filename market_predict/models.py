@@ -49,6 +49,21 @@ class FedMeeting:
 
 
 @dataclass
+class KalshiBinary:
+    """Single-outcome Kalshi market (binary yes/no, no brackets)."""
+
+    ticker: str
+    event_ticker: str
+    title: str          # from yes_sub_title or first market title
+    yes_mid: float
+    yes_bid: float
+    yes_ask: float
+    open_interest: float
+    volume_24h: float
+    close_time: str
+
+
+@dataclass
 class TickerView:
     symbol: str
     spot: float
@@ -68,6 +83,17 @@ class TickerView:
     history: Optional[Any] = None
     vix: Optional[Any] = None
     futures: Optional[Any] = None
+    # Kalshi extra panels (v2)
+    kalshi_rate_cut_count: Optional[Any] = None        # FedMeeting reuse (event=KXRATECUTCOUNT)
+    kalshi_recession: list[KalshiBinary] = field(default_factory=list)  # KXRECSSNBER (multi-event)
+    kalshi_year_max: list[KalshiBracket] = field(default_factory=list)  # one-touch HIGH cumulative
+    kalshi_year_min: list[KalshiBracket] = field(default_factory=list)  # one-touch LOW cumulative
+    # Polymarket extra panels (v2)
+    polymarket_premarket_updown: Optional[Any] = None  # PolyDailyBinary (SPX Opens Up/Down)
+    polymarket_daily_close_brackets: Optional[Any] = None  # cumulative "closes above"
+    polymarket_fed_decision: Optional[Any] = None      # next FOMC event with outcome markets
+    polymarket_rate_cuts_2026: Optional[Any] = None    # "How many Fed rate cuts in 2026"
+    polymarket_largest_company: Optional[Any] = None   # ranking event Largest Company end of [period]
     # Optional raw chain (typed Any to avoid hard pandas import in models)
     # Used by the Streamlit UI to draw per-strike OI bars; CLI does not consume.
     calls_chain: Optional[Any] = None

@@ -1,41 +1,69 @@
 """Streamlit entry: visual dashboard for a single ticker view.
 
+Layout v2: 6 rows of panels + 1 tabs row, designed for ~1440×900 screens with
+minimal scrolling. Same-dimension multi-source data is placed side-by-side.
+
 Run locally:
     streamlit run streamlit_app.py
-
-Deploy: connect this repo to share.streamlit.io and it just works.
 """
 from __future__ import annotations
 
 import streamlit as st
 
 from market_predict.cli import build_view
-from market_predict.tickers import TICKER_MAP
+from market_predict.tickers import TICKER_MAP, get_config
 from market_predict.ui import charts
 
 
 st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
 
 
-# ─────────────────────── cache layer ───────────────────────
-
-
 @st.cache_data(ttl=300, show_spinner=False)
 def load_view(symbol: str):
-    """5-minute TTL keeps Streamlit Cloud from spamming yfinance / Kalshi."""
     return build_view(symbol)
 
 
-# ─────────────────────────── UI ───────────────────────────
+def _short_fed_outcome(question: str) -> str:
+    """Compress 'Will the Fed decrease interest rates by 25 bps after the June...' → 'Cut 25bp'."""
+    q = question.lower()
+    if "no change" in q or "maintain" in q:
+        return "Hold"
+    if "decrease" in q or "cut" in q:
+        if "50" in q:
+            return "Cut ≥50bp"
+        if "25" in q:
+            return "Cut 25bp"
+        return "Cut"
+    if "increase" in q or "hike" in q:
+        if "50" in q:
+            return "Hike ≥50bp"
+        if "25" in q:
+            return "Hike 25bp"
+        return "Hike"
+    return question[:30]
+
+
+def _short_rate_cuts_outcome(question: str) -> str:
+    """'Will N Fed rate cuts happen in 2026?' → 'N cuts'."""
+    import re
+    m = re.search(r"(?:Will\s+)?(\w+)\s+Fed rate cuts?", question, re.IGNORECASE)
+    if m:
+        n = m.group(1)
+        if n.lower() in ("no", "zero", "0"):
+            return "0 cuts"
+        return f"{n} cut{'s' if n != '1' else ''}"
+    return question[:30]
+
+
+# ────────────────────── Header (title + controls) ─────────────────────
 
 
 st.title("📊 market-predict")
 st.caption(
-    "Ticker context: spot + options walls + Kalshi prediction-market distribution + Fed path. "
-    "All data sources are free and public (no auth)."
+    "SPY/QQQ trader context: spot + options walls + Kalshi/Polymarket predictions + Fed. "
+    "All sources free, public, no auth."
 )
 
-# Top controls
 ctrl_l, ctrl_r = st.columns([4, 1])
 with ctrl_l:
     symbol = st.selectbox(
@@ -46,7 +74,6 @@ with ctrl_r:
         load_view.clear()
         st.rerun()
 
-# Fetch
 with st.spinner(f"Fetching {symbol} data..."):
     try:
         view = load_view(symbol)
@@ -54,149 +81,203 @@ with st.spinner(f"Fetching {symbol} data..."):
         st.error(f"Failed to fetch data: {e}")
         st.stop()
 
-# Header metrics — two rows
-# Row 1: ticker / underlying / futures / VIX
-r1_a, r1_b, r1_c, r1_d = st.columns(4)
-r1_a.metric(view.symbol, f"${view.spot:.2f}")
-r1_b.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
+cfg = get_config(symbol)
 
+
+# ─────────────────────────── HEADER METRICS ──────────────────────────
+
+
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric(view.symbol, f"${view.spot:.2f}")
+m2.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
 if view.futures is not None:
-    r1_c.metric(
-        f"{view.futures.name} futures",
+    m3.metric(
+        f"{view.futures.name} fut",
         f"{view.futures.last:,.2f}",
-        f"{view.futures.change_pct:+.2f}% overnight",
+        f"{view.futures.change_pct:+.2f}% o/n",
     )
 else:
-    r1_c.metric(f"futures", "n/a")
-
+    m3.metric("fut", "n/a")
 if view.vix is not None:
     vix_delta = view.vix.current - view.vix.mean_30d
-    r1_d.metric(
-        "VIX",
-        f"{view.vix.current:.2f}",
-        f"{vix_delta:+.2f} vs 30d avg",
-        delta_color="inverse",  # higher VIX = bad
-    )
+    m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f}", delta_color="inverse")
 else:
-    r1_d.metric("VIX", "n/a")
-
-# Row 2: options-derived (ATM IV, P/C ratio) — only if we have options
+    m4.metric("VIX", "n/a")
 if view.options_wall:
-    r2_a, r2_b, _, _ = st.columns(4)
-    r2_a.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
-    pc = view.options_wall.total_put_oi / max(view.options_wall.total_call_oi, 1)
-    r2_b.metric("Put/Call OI", f"{pc:.2f}")
+    m5.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
+else:
+    m5.metric("ATM IV", "n/a")
 
 st.divider()
 
-# Price history + VIX mini side-by-side
-ph_l, ph_r = st.columns([2.5, 1])
-with ph_l:
+
+# ───────────────────── ROW 1: K-line + VIX mini ─────────────────────
+
+
+row1_l, row1_r = st.columns([2.5, 1])
+with row1_l:
     st.plotly_chart(charts.price_history(view), use_container_width=True)
-with ph_r:
+with row1_r:
     st.plotly_chart(charts.vix_mini(view), use_container_width=True)
-    if view.futures is not None:
-        st.caption(
-            f"📌 **{view.futures.name} {view.futures.last:,.2f}** "
-            f"({view.futures.change_pct:+.2f}% vs prev close ${view.futures.previous_close:,.2f}). "
-            f"Overnight futures lead the cash open."
-        )
 
-st.divider()
 
-# Options walls
+# ───────────────────── ROW 2: Options walls + key levels ────────────
+
+
 st.subheader("Options walls")
 if view.options_wall:
-    st.plotly_chart(charts.options_wall(view), use_container_width=True)
-    w = view.options_wall
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Call wall", f"${w.call_wall_strike:.0f}", f"{w.call_wall_oi:,} OI")
-    c2.metric("Put wall", f"${w.put_wall_strike:.0f}", f"{w.put_wall_oi:,} OI")
-    c3.metric("Max pain", f"${w.max_pain:.0f}")
-    c4.metric(
-        "Gamma flip",
-        f"${w.gamma_flip:.0f}" if w.gamma_flip is not None else "n/a",
-    )
+    row2_l, row2_r = st.columns([2.5, 1])
+    with row2_l:
+        st.plotly_chart(charts.options_wall(view), use_container_width=True)
+    with row2_r:
+        w = view.options_wall
+        st.metric("Call wall", f"${w.call_wall_strike:.0f}", f"{w.call_wall_oi:,} OI")
+        st.metric("Put wall", f"${w.put_wall_strike:.0f}", f"{w.put_wall_oi:,} OI")
+        st.metric("Max pain", f"${w.max_pain:.0f}")
+        st.metric(
+            "Gamma flip",
+            f"${w.gamma_flip:.0f}" if w.gamma_flip is not None else "n/a",
+        )
+        pc = w.total_put_oi / max(w.total_call_oi, 1)
+        st.metric("Put/Call OI", f"{pc:.2f}")
 else:
     st.info("No options chain available for this ticker.")
 
-# Two-column: Kalshi distribution + Fed path
-col_l, col_r = st.columns([1, 1])
-with col_l:
-    st.subheader("Kalshi distribution")
-    tab_daily, tab_monthly, tab_yearly = st.tabs(["Daily", "Monthly", "Yearly"])
+st.divider()
 
-    with tab_daily:
-        # Polymarket binary up/down at top — single most-watched daily signal
-        if view.polymarket_daily_updown is not None:
-            pd_ud = view.polymarket_daily_updown
-            up_col, down_col, vol_col = st.columns([1, 1, 1])
-            # Direction-tinted: green if up>down, red otherwise (delta carries arrow)
-            up_delta = f"{(pd_ud.p_up - 0.5) * 100:+.1f} pp vs coin-flip"
-            down_delta = f"{(pd_ud.p_down - 0.5) * 100:+.1f} pp vs coin-flip"
-            up_col.metric(
-                f"Poly P({view.underlying_name} UP {pd_ud.end_date})",
-                f"{pd_ud.p_up * 100:.1f}%",
-                up_delta,
-            )
-            down_col.metric(
-                f"Poly P({view.underlying_name} DOWN {pd_ud.end_date})",
-                f"{pd_ud.p_down * 100:.1f}%",
-                down_delta,
-                delta_color="inverse",
-            )
-            vol_col.metric("Poly vol24", f"${pd_ud.volume_24h:,.0f}")
-            st.caption(
-                f"📌 *{pd_ud.title}* — single binary, resolves on close. "
-                f"Source: Polymarket."
-            )
-            st.divider()
 
-        # Kalshi distribution below
-        if view.kalshi_daily:
-            close_time = view.kalshi_daily[0].close_time
-            st.plotly_chart(
-                charts.kalshi_distribution(
-                    view.kalshi_daily,
-                    view.underlying_value,
-                    view.underlying_name,
-                    f"Kalshi {view.underlying_name} — resolves {close_time}",
-                ),
-                use_container_width=True,
-            )
-            st.caption(
-                "⚠️ Daily Kalshi brackets have low OI (~$0.3k–3k vs yearly $1.8M–2.6M). "
-                "Treat as directional signal only."
-            )
-        elif view.polymarket_daily_updown is None:
-            st.info("No active daily contracts (Kalshi or Polymarket) for this underlying.")
+# ───────────── ROW 3: Today's direction (Kalshi + Poly daily) ────────
 
-    with tab_monthly:
-        if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
-            st.plotly_chart(
-                charts.polymarket_one_touch(
-                    view.polymarket_monthly,
-                    view.underlying_value,
-                    view.underlying_name,
-                ),
-                use_container_width=True,
-            )
-            st.caption(
-                f"📌 **One-touch contracts**: Yes resolves if the underlying touches "
-                f"the strike at any point before {view.polymarket_monthly.end_date}. "
-                f"Not mutually exclusive — each strike is its own bet. "
-                f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
-                f"(Kalshi does not currently list monthly range contracts.)"
-            )
-        else:
-            st.info(
-                "**No active monthly contracts** for this underlying. "
-                "Kalshi has no monthly range series active; "
-                f"Polymarket has no one-touch event matching {view.underlying_name}. "
-                "This tab will populate automatically if either platform lists one."
-            )
 
-    with tab_yearly:
+st.subheader("Today's direction — dual-source")
+row3_l, row3_r = st.columns([2.5, 1])
+
+with row3_l:
+    # Dual-source close brackets chart (Kalshi $25 SPX brackets + Poly $5 SPY cumulative)
+    if view.kalshi_daily or view.polymarket_daily_close_brackets:
+        st.plotly_chart(
+            charts.daily_brackets_dual(
+                view.kalshi_daily,
+                view.polymarket_daily_close_brackets,
+                view.spot,
+                view.underlying_value,
+                view.underlying_name,
+                cfg.get("spx_to_spy_ratio", 10.0),
+            ),
+            use_container_width=True,
+        )
+    else:
+        st.info("No daily brackets data (Kalshi or Polymarket).")
+
+with row3_r:
+    # Up/Down binary metrics (close + premarket)
+    if view.polymarket_daily_updown is not None:
+        pd_ud = view.polymarket_daily_updown
+        st.metric(
+            f"P(close UP {pd_ud.end_date})",
+            f"{pd_ud.p_up * 100:.1f}%",
+            f"{(pd_ud.p_up - 0.5) * 100:+.1f} pp",
+        )
+        st.caption(f"vol24 ${pd_ud.volume_24h:,.0f}")
+    else:
+        st.metric("P(close UP)", "n/a")
+
+    if view.polymarket_premarket_updown is not None:
+        pd_pre = view.polymarket_premarket_updown
+        st.metric(
+            f"P(open UP {pd_pre.end_date})",
+            f"{pd_pre.p_up * 100:.1f}%",
+            f"{(pd_pre.p_up - 0.5) * 100:+.1f} pp",
+        )
+        st.caption(f"vol24 ${pd_pre.volume_24h:,.0f}")
+    else:
+        st.metric("P(open UP)", "n/a")
+        st.caption("Polymarket premarket event not active right now.")
+
+st.divider()
+
+
+# ───────────── ROW 4: Fed/rates (3 panels) ────────────
+
+
+st.subheader("Fed / rates")
+row4_a, row4_b, row4_c = st.columns([2, 1, 1])
+
+with row4_a:
+    st.plotly_chart(charts.fed_path(view), use_container_width=True)
+
+with row4_b:
+    st.plotly_chart(
+        charts.kalshi_event_outcomes_bar(
+            view.kalshi_rate_cut_count,
+            title="Kalshi: 2026 rate cuts count",
+            color="rgba(155, 89, 182, 0.85)",
+        ),
+        use_container_width=True,
+    )
+
+with row4_c:
+    if view.polymarket_fed_decision is not None:
+        # Wrap PolyOutcomeEvent into FedMeeting-like for the same chart fn
+        from market_predict.models import FedMeeting, FedOutcome
+        wrapped = FedMeeting(
+            event_ticker=view.polymarket_fed_decision.slug,
+            close_time=view.polymarket_fed_decision.end_date,
+            outcomes=[
+                FedOutcome(
+                    ticker="",
+                    title=_short_fed_outcome(o.question),
+                    yes_mid=o.yes_price,
+                    open_interest=o.open_interest,
+                    volume_24h=o.volume_24h,
+                )
+                for o in view.polymarket_fed_decision.markets
+            ],
+        )
+        st.plotly_chart(
+            charts.kalshi_event_outcomes_bar(
+                wrapped,
+                title="Poly: next FOMC",
+                color="rgba(241, 196, 15, 0.85)",
+            ),
+            use_container_width=True,
+        )
+    else:
+        st.info("Polymarket Fed Decision event not found.")
+
+st.divider()
+
+
+# ─────────────────────────── TABS row ───────────────────────────────
+
+
+tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
+    ["📅 Monthly", "📆 Yearly", "🌍 Macro / Recession", "🚀 Mag 7", "🏛 2026 Cuts"]
+)
+
+with tab_monthly:
+    if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
+        st.plotly_chart(
+            charts.polymarket_one_touch(
+                view.polymarket_monthly,
+                view.underlying_value,
+                view.underlying_name,
+            ),
+            use_container_width=True,
+        )
+        st.caption(
+            f"📌 **One-touch contracts**: Yes resolves if the underlying touches "
+            f"the strike at any point before {view.polymarket_monthly.end_date}. "
+            f"Not mutually exclusive — each strike is its own bet. "
+            f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
+            f"(Kalshi does not currently list monthly range contracts.)"
+        )
+    else:
+        st.info("No active monthly Polymarket one-touch.")
+
+with tab_yearly:
+    yc_l, yc_r = st.columns([2, 1])
+    with yc_l:
         if view.kalshi_yearly:
             close_time = view.kalshi_yearly[0].close_time
             st.plotly_chart(
@@ -208,61 +289,107 @@ with col_l:
                 ),
                 use_container_width=True,
             )
+    with yc_r:
+        st.markdown(f"**{view.underlying_name} year MAX one-touch** (Kalshi)")
+        if view.kalshi_year_max:
+            # Already cumulative; show first 5 sorted by strike
+            top = sorted(view.kalshi_year_max, key=lambda b: b.strike_low or 0)[:6]
+            for b in top:
+                if b.strike_low:
+                    st.write(
+                        f"P(year max ≥ {b.strike_low:,.0f}) = **{b.yes_mid*100:.1f}%**  "
+                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI ${b.open_interest:,.0f}</span>",
+                        unsafe_allow_html=True,
+                    )
         else:
-            st.info("No active yearly Kalshi brackets.")
+            st.caption("No data")
 
-with col_r:
-    st.subheader("Fed path")
-    st.plotly_chart(charts.fed_path(view), use_container_width=True)
+        st.markdown("---")
+        st.markdown(f"**{view.underlying_name} year MIN one-touch** (Kalshi)")
+        if view.kalshi_year_min:
+            top = sorted(view.kalshi_year_min, key=lambda b: -(b.strike_high or 0))[:6]
+            for b in top:
+                if b.strike_high:
+                    st.write(
+                        f"P(year min ≤ {b.strike_high:,.0f}) = **{b.yes_mid*100:.1f}%**  "
+                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI ${b.open_interest:,.0f}</span>",
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("No data")
+
+with tab_macro:
+    mc_l, mc_r = st.columns([1, 1])
+    with mc_l:
+        st.plotly_chart(
+            charts.recession_gauge(view.kalshi_recession),
+            use_container_width=True,
+        )
+        if view.kalshi_recession:
+            for b in view.kalshi_recession:
+                st.caption(
+                    f"**{b.event_ticker}** — *{b.title}*  "
+                    f"P = {b.yes_mid * 100:.1f}%  ·  OI ${b.open_interest:,.0f}"
+                )
+    with mc_r:
+        st.markdown("### Notes")
+        st.markdown(
+            "- **NBER recession** = National Bureau of Economic Research formal recession call. "
+            "Lagging indicator, but contract resolves YES if NBER declares recession start in the period.\n"
+            "- Historical base rate of recession in any given year ≈ 16–17%.\n"
+            "- Reference threshold (blue line) on the gauge = 16.5%.\n"
+            f"- Source: Kalshi `KXRECSSNBER` event, total OI typically ${sum(b.open_interest for b in view.kalshi_recession):,.0f}."
+        )
+
+with tab_mag7:
+    st.plotly_chart(
+        charts.mag7_ranking_bar(view.polymarket_largest_company),
+        use_container_width=True,
+    )
+    if view.polymarket_largest_company:
+        st.caption(
+            f"📌 **{view.polymarket_largest_company.title}** — "
+            f"event vol24 ≈ ${view.polymarket_largest_company.volume_24h:,.0f}. "
+            f"Source: Polymarket. NVDA/AAPL/MSFT/etc. dominate S&P 500 weight, so this ranks "
+            f"the AI-theme winner."
+        )
+
+with tab_rates_2026:
+    if view.polymarket_rate_cuts_2026:
+        from market_predict.models import FedMeeting, FedOutcome
+        wrapped = FedMeeting(
+            event_ticker=view.polymarket_rate_cuts_2026.slug,
+            close_time=view.polymarket_rate_cuts_2026.end_date,
+            outcomes=[
+                FedOutcome(
+                    ticker="",
+                    title=_short_rate_cuts_outcome(o.question),
+                    yes_mid=o.yes_price,
+                    open_interest=o.open_interest,
+                    volume_24h=o.volume_24h,
+                )
+                for o in view.polymarket_rate_cuts_2026.markets
+            ],
+        )
+        st.plotly_chart(
+            charts.kalshi_event_outcomes_bar(
+                wrapped,
+                title="Polymarket: How many Fed rate cuts in 2026?",
+                color="rgba(241, 196, 15, 0.85)",
+            ),
+            use_container_width=True,
+        )
+        st.caption(
+            f"📌 Compare to Kalshi `KXRATECUTCOUNT` in the row above — same question, "
+            f"two platforms. event vol24 ≈ ${view.polymarket_rate_cuts_2026.volume_24h:,.0f}."
+        )
+    else:
+        st.info("Polymarket 'rate cuts in 2026' event not found.")
 
 st.divider()
 
-# Auto-generated narrative notes
-with st.expander("💡 Reading notes (auto-generated)"):
-    notes = []
-    if view.options_wall:
-        w = view.options_wall
-        if w.call_wall_strike < view.spot:
-            notes.append(
-                f"**Call wall below spot** — most call OI concentrated at "
-                f"${w.call_wall_strike:.0f}, which sits ${view.spot - w.call_wall_strike:.0f} "
-                f"({(view.spot - w.call_wall_strike) / view.spot * 100:.1f}%) below current price. "
-                f"This is unusual; check whether it reflects ITM positions vs. true resistance."
-            )
-        if w.put_wall_strike < view.spot * 0.95:
-            notes.append(
-                f"**Put wall {(view.spot - w.put_wall_strike) / view.spot * 100:.1f}% below spot** "
-                f"at ${w.put_wall_strike:.0f} — typical crash-hedge zone."
-            )
-        pc = w.total_put_oi / max(w.total_call_oi, 1)
-        if pc > 1.5:
-            notes.append(f"**P/C ratio {pc:.2f}** — heavily hedged book.")
-        elif pc < 0.7:
-            notes.append(f"**P/C ratio {pc:.2f}** — call-heavy, complacent positioning.")
-        if w.gamma_flip is not None:
-            dist = (w.gamma_flip - view.spot) / view.spot * 100
-            notes.append(
-                f"**Gamma flip at ${w.gamma_flip:.0f}** ({dist:+.1f}% from spot) — "
-                f"dealer hedging sign change near current level."
-            )
-
-    if view.fed_meetings:
-        next_m = view.fed_meetings[0]
-        hold = next((o for o in next_m.outcomes if "maintain" in o.title.lower() or "hold" in o.title.lower()), None)
-        if hold:
-            notes.append(
-                f"**Next FOMC ({next_m.close_time})**: P(hold) = {hold.yes_mid * 100:.1f}% — "
-                f"{'tight consensus' if hold.yes_mid > 0.85 else 'meaningful uncertainty'}."
-            )
-
-    if notes:
-        for n in notes:
-            st.markdown(f"- {n}")
-    else:
-        st.write("(no notable patterns detected)")
-
 st.caption(
     f"Last fetch: {view.timestamp:%Y-%m-%d %H:%M}  ·  "
-    f"data: yfinance + Kalshi public API  ·  "
+    f"data: yfinance + Kalshi + Polymarket  ·  "
     f"cache TTL: 5 min"
 )

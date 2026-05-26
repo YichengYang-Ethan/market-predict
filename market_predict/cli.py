@@ -7,8 +7,22 @@ import yfinance as yf
 
 from market_predict.models import TickerView
 from market_predict.render import render
-from market_predict.sources.kalshi import fetch_brackets, fetch_fed_meetings
-from market_predict.sources.polymarket import fetch_daily_up_down, fetch_monthly_one_touch
+from market_predict.sources.kalshi import (
+    fetch_binary_events,
+    fetch_brackets,
+    fetch_event_outcomes,
+    fetch_fed_meetings,
+    fetch_one_touch_cumulative,
+)
+from market_predict.sources.polymarket import (
+    fetch_daily_close_brackets,
+    fetch_daily_up_down,
+    fetch_fed_decision_event,
+    fetch_largest_company_event,
+    fetch_monthly_one_touch,
+    fetch_premarket_updown,
+    fetch_rate_cuts_count_2026,
+)
 from market_predict.sources.yfin import (
     get_futures,
     get_history,
@@ -70,6 +84,47 @@ def build_view(symbol: str) -> TickerView:
     print(f"Fetching Fed path ...", file=sys.stderr)
     meetings = fetch_fed_meetings()
 
+    # ─── v2 additions ───
+    print(f"Fetching Kalshi rate-cut count + recession + year MAX/MIN ...", file=sys.stderr)
+    try:
+        rate_cut_count = fetch_event_outcomes("KXRATECUTCOUNT")
+    except Exception as e:
+        print(f"  (rate cut count: {e})", file=sys.stderr); rate_cut_count = None
+    try:
+        recession = fetch_binary_events("KXRECSSNBER")
+    except Exception as e:
+        print(f"  (recession: {e})", file=sys.stderr); recession = []
+    try:
+        year_max = fetch_one_touch_cumulative(cfg["kalshi_year_max"])
+    except Exception as e:
+        print(f"  (year max: {e})", file=sys.stderr); year_max = []
+    try:
+        year_min = fetch_one_touch_cumulative(cfg["kalshi_year_min"])
+    except Exception as e:
+        print(f"  (year min: {e})", file=sys.stderr); year_min = []
+
+    print(f"Fetching Polymarket premarket + close brackets + Fed/rate cuts + ranking ...", file=sys.stderr)
+    try:
+        poly_premarket = fetch_premarket_updown(cfg["underlying_name"])
+    except Exception as e:
+        print(f"  (premarket: {e})", file=sys.stderr); poly_premarket = None
+    try:
+        poly_close_brackets = fetch_daily_close_brackets(cfg["underlying_name"])
+    except Exception as e:
+        print(f"  (close brackets: {e})", file=sys.stderr); poly_close_brackets = None
+    try:
+        poly_fed = fetch_fed_decision_event()
+    except Exception as e:
+        print(f"  (poly fed: {e})", file=sys.stderr); poly_fed = None
+    try:
+        poly_cuts = fetch_rate_cuts_count_2026()
+    except Exception as e:
+        print(f"  (poly cuts: {e})", file=sys.stderr); poly_cuts = None
+    try:
+        poly_largest = fetch_largest_company_event()
+    except Exception as e:
+        print(f"  (largest: {e})", file=sys.stderr); poly_largest = None
+
     return TickerView(
         symbol=symbol.upper(),
         spot=spot,
@@ -88,6 +143,15 @@ def build_view(symbol: str) -> TickerView:
         history=history,
         vix=vix,
         futures=futures,
+        kalshi_rate_cut_count=rate_cut_count,
+        kalshi_recession=recession,
+        kalshi_year_max=year_max,
+        kalshi_year_min=year_min,
+        polymarket_premarket_updown=poly_premarket,
+        polymarket_daily_close_brackets=poly_close_brackets,
+        polymarket_fed_decision=poly_fed,
+        polymarket_rate_cuts_2026=poly_cuts,
+        polymarket_largest_company=poly_largest,
     )
 
 

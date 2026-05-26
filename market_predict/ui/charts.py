@@ -310,6 +310,209 @@ def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figu
     return fig
 
 
+# ─────────────────── Daily brackets dual source ─────────────────────
+
+
+def daily_brackets_dual(
+    kalshi_brackets,        # list[KalshiBracket] SPX-scale
+    poly_close_brackets,    # PolyCloseBracketsEvent or None (SPY-scale cumulative)
+    spot: float,            # SPY ETF price
+    underlying_value: float,
+    underlying_name: str,
+    spx_to_spy_ratio: float,
+) -> go.Figure:
+    """Two-source daily close brackets on a unified SPY-price X-axis.
+
+    Kalshi KXINX brackets (SPX scale) are divided by the ratio to fit SPY scale.
+    Polymarket cumulative 'closes above' is differenced into bracket probabilities.
+    Two color-coded bar series share the X-axis so divergence is visible directly.
+    """
+    fig = go.Figure()
+    if not kalshi_brackets and not poly_close_brackets:
+        fig.update_layout(title="Daily close brackets — no data")
+        return fig
+
+    # Kalshi → SPY scale (divide strikes by ratio)
+    kalshi_between = [
+        b for b in (kalshi_brackets or [])
+        if b.kind == "between" and b.strike_low and b.strike_high and b.yes_mid > 0
+    ]
+    if kalshi_between:
+        xs = [((b.strike_low + b.strike_high) / 2) / spx_to_spy_ratio for b in kalshi_between]
+        ys = [b.yes_mid * 100 for b in kalshi_between]
+        labels = [
+            f"Kalshi: {b.strike_low:,.0f}-{b.strike_high:,.0f} (SPX)<br>= ${b.strike_low/spx_to_spy_ratio:.1f}-${b.strike_high/spx_to_spy_ratio:.1f} (SPY)<br>P = {b.yes_mid*100:.1f}%<br>OI ${b.open_interest:,.0f}"
+            for b in kalshi_between
+        ]
+        # SPY-equivalent bar width
+        width = (kalshi_between[0].strike_high - kalshi_between[0].strike_low) / spx_to_spy_ratio * 0.85
+        fig.add_trace(go.Bar(
+            x=xs, y=ys, width=width,
+            customdata=labels,
+            hovertemplate="%{customdata}<extra></extra>",
+            marker_color="rgba(155, 89, 182, 0.55)",  # Kalshi purple
+            name=f"Kalshi {underlying_name} brackets",
+        ))
+
+    # Polymarket cumulative → differenced brackets
+    if poly_close_brackets and poly_close_brackets.brackets:
+        sb = sorted(poly_close_brackets.brackets, key=lambda b: b.strike)
+        diff_x, diff_y, diff_lbl = [], [], []
+        for i in range(len(sb) - 1):
+            lo, hi = sb[i].strike, sb[i + 1].strike
+            prob = sb[i].yes_price - sb[i + 1].yes_price
+            if prob <= 0:
+                # negative diff = pricing noise; clamp to small positive
+                prob = max(prob, 0)
+            if prob == 0:
+                continue
+            diff_x.append((lo + hi) / 2)
+            diff_y.append(prob * 100)
+            diff_lbl.append(
+                f"Polymarket: ${lo:.0f}-${hi:.0f}<br>"
+                f"P(close > ${lo:.0f}) - P(close > ${hi:.0f})<br>"
+                f"= {prob * 100:.1f}%"
+            )
+        width_p = (sb[1].strike - sb[0].strike) * 0.85 if len(sb) > 1 else 5
+        fig.add_trace(go.Bar(
+            x=diff_x, y=diff_y, width=width_p,
+            customdata=diff_lbl,
+            hovertemplate="%{customdata}<extra></extra>",
+            marker_color="rgba(241, 196, 15, 0.55)",  # Polymarket gold
+            name=f"Polymarket {underlying_name} close above",
+        ))
+
+    fig.add_vline(
+        x=spot, line_color="#3498db", line_dash="solid", line_width=2,
+        annotation_text=f"<b>spot ${spot:.2f}</b>",
+        annotation_position="top",
+    )
+
+    close_date = None
+    if poly_close_brackets:
+        close_date = poly_close_brackets.end_date
+    elif kalshi_brackets:
+        close_date = kalshi_brackets[0].close_time
+
+    fig.update_layout(
+        title=f"Daily close brackets — resolve {close_date or 'today'} (Kalshi 紫 / Polymarket 黄)",
+        xaxis_title=f"{underlying_name} close price (SPY-scale)",
+        yaxis_title="Probability (%)",
+        height=380,
+        barmode="overlay",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+        margin=dict(t=70, b=40, l=50, r=20),
+    )
+    return fig
+
+
+# ───────────────── Kalshi rate cut count / event outcomes ───────────
+
+
+def kalshi_event_outcomes_bar(meeting, title: str, color: str = "#9b59b6") -> go.Figure:
+    """Horizontal bar of outcome probabilities for a Kalshi multi-outcome event
+    (rate cut count, FOMC decision, etc.). Reuses FedMeeting dataclass."""
+    fig = go.Figure()
+    if meeting is None or not meeting.outcomes:
+        fig.update_layout(title=f"{title} — no data")
+        return fig
+    outcomes = sorted(meeting.outcomes, key=lambda o: -o.yes_mid)
+    # Show top 8 by probability so chart stays readable
+    outcomes = outcomes[:8]
+    fig.add_trace(go.Bar(
+        y=[o.title for o in outcomes],
+        x=[o.yes_mid * 100 for o in outcomes],
+        orientation="h",
+        text=[f"{o.yes_mid * 100:.0f}%" for o in outcomes],
+        textposition="outside",
+        marker_color=color,
+        hovertemplate="%{y}<br>P = %{x:.1f}%<br>OI $%{customdata:,.0f}<extra></extra>",
+        customdata=[o.open_interest for o in outcomes],
+    ))
+    fig.update_layout(
+        title=f"{title} (resolve {meeting.close_time})",
+        height=300,
+        xaxis_title="P (%)",
+        yaxis=dict(autorange="reversed"),  # highest at top
+        margin=dict(t=50, b=40, l=140, r=40),
+        showlegend=False,
+    )
+    return fig
+
+
+# ───────────────────────── Recession gauge ──────────────────────────
+
+
+def recession_gauge(kalshi_recession_list) -> go.Figure:
+    """Gauge for KXRECSSNBER — picks the 2026 (current year) event by default."""
+    fig = go.Figure()
+    if not kalshi_recession_list:
+        fig.update_layout(title="Recession — no data")
+        return fig
+
+    # Pick the soonest-resolving binary (closest year)
+    current = sorted(kalshi_recession_list, key=lambda b: b.close_time)[0]
+    p = current.yes_mid * 100
+
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=p,
+        number={"suffix": "%", "font": {"size": 36}},
+        title={"text": f"NBER recession ({current.event_ticker})", "font": {"size": 14}},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1},
+            "bar": {"color": "#c0392b" if p > 30 else ("#f39c12" if p > 15 else "#27ae60")},
+            "steps": [
+                {"range": [0, 15], "color": "rgba(39, 174, 96, 0.18)"},
+                {"range": [15, 30], "color": "rgba(241, 196, 15, 0.18)"},
+                {"range": [30, 100], "color": "rgba(192, 57, 43, 0.18)"},
+            ],
+            "threshold": {
+                "line": {"color": "#3498db", "width": 3},
+                "thickness": 0.75,
+                "value": 16.5,  # historical baseline avg
+            },
+        },
+    ))
+    fig.update_layout(
+        height=260,
+        margin=dict(t=40, b=20, l=20, r=20),
+    )
+    return fig
+
+
+# ───────────────────────── Mag 7 ranking ────────────────────────────
+
+
+def mag7_ranking_bar(poly_largest_event) -> go.Figure:
+    """Horizontal bar showing 'Will [company] be largest?' probabilities."""
+    fig = go.Figure()
+    if poly_largest_event is None or not poly_largest_event.rows:
+        fig.update_layout(title="Largest company — no data")
+        return fig
+
+    rows = poly_largest_event.rows[:10]
+    fig.add_trace(go.Bar(
+        y=[r.name for r in rows],
+        x=[r.yes_price * 100 for r in rows],
+        orientation="h",
+        text=[f"{r.yes_price * 100:.1f}%" for r in rows],
+        textposition="outside",
+        marker_color="rgba(241, 196, 15, 0.85)",
+        hovertemplate="%{y}<br>P(largest) = %{x:.1f}%<br>vol24 $%{customdata:,.0f}<extra></extra>",
+        customdata=[r.volume_24h for r in rows],
+    ))
+    fig.update_layout(
+        title=f"{poly_largest_event.title} (Polymarket)",
+        height=340,
+        xaxis_title="P(largest company) %",
+        yaxis=dict(autorange="reversed"),
+        margin=dict(t=50, b=40, l=80, r=60),
+        showlegend=False,
+    )
+    return fig
+
+
 # ─────────────────────────── Fed path ───────────────────────────────
 
 

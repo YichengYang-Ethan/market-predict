@@ -53,6 +53,59 @@ class PolyDailyBinary:
     volume_24h: float
 
 
+@dataclass
+class PolyCloseBracket:
+    """Polymarket 'closes above $X' market — cumulative probability."""
+
+    strike: float       # SPY price (or whatever ETF)
+    yes_price: float    # P(close >= strike)
+    volume_24h: float
+
+
+@dataclass
+class PolyCloseBracketsEvent:
+    title: str
+    end_date: str
+    volume_24h: float
+    brackets: list[PolyCloseBracket]
+
+
+@dataclass
+class PolyOutcomeMarket:
+    """One outcome within an event like 'Fed Decision in June' or 'Rate Cuts Count'."""
+
+    question: str
+    yes_price: float
+    volume_24h: float
+    open_interest: float
+
+
+@dataclass
+class PolyOutcomeEvent:
+    title: str
+    slug: str
+    end_date: str
+    volume_24h: float
+    markets: list[PolyOutcomeMarket]
+
+
+@dataclass
+class PolyRankingRow:
+    """One company in a 'Largest Company' style ranking event."""
+
+    name: str          # groupItemTitle
+    yes_price: float
+    volume_24h: float
+
+
+@dataclass
+class PolyRankingEvent:
+    title: str
+    end_date: str
+    volume_24h: float
+    rows: list[PolyRankingRow]
+
+
 # Underlying-name → list of keywords to match in event titles.
 # Polymarket uses "SPY" / "SPX" / "S&P 500" interchangeably; we match any.
 UNDERLYING_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -236,4 +289,209 @@ def fetch_daily_up_down(underlying_name: str) -> Optional[PolyDailyBinary]:
         p_up=p_up,
         p_down=p_down,
         volume_24h=_safe_float(e.get("volume24hr", 0)),
+    )
+
+
+def fetch_premarket_updown(underlying_name: str) -> Optional[PolyDailyBinary]:
+    """Polymarket 'X Opens Up or Down' — pre-market direction binary."""
+    keywords = UNDERLYING_KEYWORDS.get(underlying_name, ())
+    if not keywords:
+        return None
+
+    today = __import__("datetime").date.today().isoformat()
+    events = fetch_daily_close_events()
+    candidates = []
+    for e in events:
+        title = e.get("title", "")
+        if "opens up or down" not in title.lower():
+            continue
+        if not any(k.lower() in title.lower() for k in keywords):
+            continue
+        end = e.get("endDate", "")[:10]
+        if end < today:
+            continue
+        candidates.append(e)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda e: e.get("endDate", ""))
+    e = candidates[0]
+    markets = e.get("markets") or []
+    if not markets:
+        return None
+    m = markets[0]
+    import json
+    try:
+        prices = json.loads(m.get("outcomePrices", "[]"))
+    except (ValueError, TypeError):
+        prices = []
+    if len(prices) < 2:
+        return None
+    return PolyDailyBinary(
+        title=e.get("title", ""),
+        end_date=e.get("endDate", "")[:10],
+        p_up=_safe_float(prices[0]),
+        p_down=_safe_float(prices[1]),
+        volume_24h=_safe_float(e.get("volume24hr", 0)),
+    )
+
+
+_CLOSE_ABOVE_PATTERN = re.compile(r"\$([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def fetch_daily_close_brackets(underlying_name: str) -> Optional[PolyCloseBracketsEvent]:
+    """Polymarket 'X closes above ___ on [today]' — cumulative bracket distribution."""
+    keywords = UNDERLYING_KEYWORDS.get(underlying_name, ())
+    if not keywords:
+        return None
+    today = __import__("datetime").date.today().isoformat()
+    events = fetch_daily_close_events()
+    candidates = []
+    for e in events:
+        title = e.get("title", "")
+        if "closes above" not in title.lower():
+            continue
+        if not any(k.lower() in title.lower() for k in keywords):
+            continue
+        end = e.get("endDate", "")[:10]
+        if end < today:
+            continue
+        candidates.append(e)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda e: e.get("endDate", ""))
+    e = candidates[0]
+    import json
+    brackets = []
+    for m in e.get("markets", []):
+        q = m.get("question", "")
+        match = _CLOSE_ABOVE_PATTERN.search(q)
+        if not match:
+            continue
+        try:
+            strike = float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        try:
+            prices = json.loads(m.get("outcomePrices", "[]"))
+            yes_price = _safe_float(prices[0]) if prices else 0
+        except (ValueError, TypeError, IndexError):
+            yes_price = 0
+        if yes_price <= 0 or yes_price >= 1:
+            # Skip trivially resolved
+            continue
+        brackets.append(PolyCloseBracket(
+            strike=strike,
+            yes_price=yes_price,
+            volume_24h=_safe_float(m.get("volume24hr", 0)),
+        ))
+    brackets.sort(key=lambda b: b.strike)
+    return PolyCloseBracketsEvent(
+        title=e.get("title", ""),
+        end_date=e.get("endDate", "")[:10],
+        volume_24h=_safe_float(e.get("volume24hr", 0)),
+        brackets=brackets,
+    )
+
+
+def _fetch_event_by_title_substring(
+    tag_slugs: tuple[str, ...], title_substring: str
+) -> Optional[dict]:
+    """Find soonest-resolving event whose title contains substring across given tags."""
+    today = __import__("datetime").date.today().isoformat()
+    all_events: dict[str, dict] = {}
+    for tag in tag_slugs:
+        try:
+            r = requests.get(
+                f"{BASE}/events",
+                params={"tag_slug": tag, "active": "true", "closed": "false", "limit": 200},
+                timeout=15,
+            )
+            data = r.json()
+            evs = data if isinstance(data, list) else data.get("data", [])
+            for e in evs:
+                all_events[e.get("id")] = e
+        except Exception:
+            continue
+    candidates = [
+        e for e in all_events.values()
+        if title_substring.lower() in e.get("title", "").lower()
+        and e.get("endDate", "")[:10] >= today
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda e: e.get("endDate", ""))
+    return candidates[0]
+
+
+def _make_outcome_event(e: dict) -> PolyOutcomeEvent:
+    import json
+    outcomes = []
+    for m in e.get("markets", []):
+        try:
+            prices = json.loads(m.get("outcomePrices", "[]"))
+            yes = _safe_float(prices[0]) if prices else 0
+        except (ValueError, TypeError, IndexError):
+            yes = 0
+        outcomes.append(PolyOutcomeMarket(
+            question=m.get("question", ""),
+            yes_price=yes,
+            volume_24h=_safe_float(m.get("volume24hr", 0)),
+            open_interest=_safe_float(m.get("liquidity", 0)),
+        ))
+    return PolyOutcomeEvent(
+        title=e.get("title", ""),
+        slug=e.get("slug", ""),
+        end_date=e.get("endDate", "")[:10],
+        volume_24h=_safe_float(e.get("volume24hr", 0)),
+        markets=outcomes,
+    )
+
+
+def fetch_fed_decision_event() -> Optional[PolyOutcomeEvent]:
+    """Soonest 'Fed Decision in [month]' event with binary outcome markets."""
+    e = _fetch_event_by_title_substring(
+        ("fed", "fed-rates", "jerome-powell"), "Fed Decision in"
+    )
+    return _make_outcome_event(e) if e else None
+
+
+def fetch_rate_cuts_count_2026() -> Optional[PolyOutcomeEvent]:
+    """'How many Fed rate cuts in 2026?' event."""
+    e = _fetch_event_by_title_substring(
+        ("fed", "fed-rates"), "How many Fed rate cuts"
+    )
+    return _make_outcome_event(e) if e else None
+
+
+def fetch_largest_company_event() -> Optional[PolyRankingEvent]:
+    """Soonest 'Largest Company end of [period]' ranking event."""
+    e = _fetch_event_by_title_substring(
+        ("big-tech", "tech", "business"), "Largest Company end of"
+    )
+    if e is None:
+        return None
+    import json
+    rows = []
+    for m in e.get("markets", []):
+        name = m.get("groupItemTitle", "") or m.get("question", "")[:40]
+        # Skip placeholder companies ("Company B", "Company D" — Polymarket's
+        # template slots for low-prob outcomes that nobody bets on)
+        if name.lower().startswith("company "):
+            continue
+        try:
+            prices = json.loads(m.get("outcomePrices", "[]"))
+            yes = _safe_float(prices[0]) if prices else 0
+        except (ValueError, TypeError, IndexError):
+            yes = 0
+        rows.append(PolyRankingRow(
+            name=name,
+            yes_price=yes,
+            volume_24h=_safe_float(m.get("volume24hr", 0)),
+        ))
+    rows.sort(key=lambda r: -r.yes_price)
+    return PolyRankingEvent(
+        title=e.get("title", ""),
+        end_date=e.get("endDate", "")[:10],
+        volume_24h=_safe_float(e.get("volume24hr", 0)),
+        rows=rows,
     )

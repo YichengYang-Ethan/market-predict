@@ -11,16 +11,22 @@ TICKER_MAP: dict[str, dict[str, str]] = {
         "underlying_name": "S&P 500",
         "kalshi_yearly": "KXINXY",
         "kalshi_daily": "KXINX",
-        "futures_symbol": "ES=F",      # E-mini S&P 500 futures
+        "kalshi_year_max": "KXINXMAXY",     # year max one-touch (cumulative above)
+        "kalshi_year_min": "KXINXMINY",     # year min one-touch (cumulative below)
+        "futures_symbol": "ES=F",
         "futures_name": "ES",
+        "spx_to_spy_ratio": 10.0,           # SPX ≈ SPY × 10 (approximate)
     },
     "QQQ": {
         "underlying_symbol": "^NDX",
         "underlying_name": "Nasdaq 100",
         "kalshi_yearly": "KXNASDAQ100Y",
         "kalshi_daily": "KXNASDAQ100",
-        "futures_symbol": "NQ=F",      # E-mini Nasdaq 100 futures
+        "kalshi_year_max": "KXNASDAQ100MAXY",
+        "kalshi_year_min": "KXNASDAQ100MINY",
+        "futures_symbol": "NQ=F",
         "futures_name": "NQ",
+        "spx_to_spy_ratio": 40.0,           # NDX ≈ QQQ × 40 (approximate)
     },
 }
 
