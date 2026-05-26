@@ -60,6 +60,9 @@ class TickerView:
     fed_meetings: list[FedMeeting]
     # Daily-resolution Kalshi brackets (single-day expiry, lower OI than yearly)
     kalshi_daily: list[KalshiBracket] = field(default_factory=list)
+    # Polymarket monthly one-touch (HIGH/LOW); typed Any to keep models.py
+    # free of source-specific imports. May be None if no contract available.
+    polymarket_monthly: Optional[Any] = None
     # Optional raw chain (typed Any to avoid hard pandas import in models)
     # Used by the Streamlit UI to draw per-strike OI bars; CLI does not consume.
     calls_chain: Optional[Any] = None

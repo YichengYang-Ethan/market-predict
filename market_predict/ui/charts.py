@@ -150,6 +150,63 @@ def kalshi_distribution(
     return fig
 
 
+# ─────────────────── Polymarket one-touch ───────────────────────────
+
+
+def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figure:
+    """Two-line chart: HIGH-touch probability vs strike (green up), LOW-touch (red down).
+
+    These are NOT a distribution — they are independent one-touch probabilities,
+    so each strike has its own touch-or-not bet. We plot them as connected lines
+    to show how probability decays with distance from spot.
+    """
+    fig = go.Figure()
+    if poly_event is None or not poly_event.brackets:
+        fig.update_layout(title="Polymarket — no contracts for this underlying")
+        return fig
+
+    high = sorted([b for b in poly_event.brackets if b.direction == "HIGH"], key=lambda b: b.strike)
+    low = sorted([b for b in poly_event.brackets if b.direction == "LOW"], key=lambda b: b.strike, reverse=True)
+
+    if high:
+        fig.add_trace(go.Scatter(
+            x=[b.strike for b in high],
+            y=[b.yes_price * 100 for b in high],
+            mode="lines+markers",
+            name="P(HIGH touched)",
+            line=dict(color="#27ae60", width=2),
+            marker=dict(size=10),
+            hovertemplate="Strike $%{x:,.0f}<br>P(touch HIGH) = %{y:.1f}%<extra></extra>",
+        ))
+    if low:
+        fig.add_trace(go.Scatter(
+            x=[b.strike for b in low],
+            y=[b.yes_price * 100 for b in low],
+            mode="lines+markers",
+            name="P(LOW touched)",
+            line=dict(color="#c0392b", width=2),
+            marker=dict(size=10),
+            hovertemplate="Strike $%{x:,.0f}<br>P(touch LOW) = %{y:.1f}%<extra></extra>",
+        ))
+
+    fig.add_vline(
+        x=ref_value, line_color="#2c3e50", line_dash="solid", line_width=2,
+        annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
+        annotation_position="top",
+    )
+
+    fig.update_layout(
+        title=f"Polymarket one-touch — {poly_event.title}",
+        xaxis_title=ref_name,
+        yaxis_title="P(touched by expiry) (%)",
+        yaxis_range=[0, 100],
+        height=400,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(t=70, b=40, l=50, r=20),
+    )
+    return fig
+
+
 # ─────────────────────────── Fed path ───────────────────────────────
 
 

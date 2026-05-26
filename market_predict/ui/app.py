@@ -107,11 +107,29 @@ with col_l:
             st.info("No active daily Kalshi brackets for this underlying right now.")
 
     with tab_monthly:
-        st.info(
-            "**Kalshi does not currently list monthly range contracts** for S&P 500 or Nasdaq 100. "
-            "Series `KXINXM` / `KXNASDAQ100M` exist in their catalog but show 0 active markets. "
-            "If they relist, this tab will populate automatically."
-        )
+        if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
+            st.plotly_chart(
+                charts.polymarket_one_touch(
+                    view.polymarket_monthly,
+                    view.underlying_value,
+                    view.underlying_name,
+                ),
+                use_container_width=True,
+            )
+            st.caption(
+                f"📌 **One-touch contracts**: Yes resolves if the underlying touches "
+                f"the strike at any point before {view.polymarket_monthly.end_date}. "
+                f"Not mutually exclusive — each strike is its own bet. "
+                f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
+                f"(Kalshi does not currently list monthly range contracts.)"
+            )
+        else:
+            st.info(
+                "**No active monthly contracts** for this underlying. "
+                "Kalshi has no monthly range series active; "
+                f"Polymarket has no one-touch event matching {view.underlying_name}. "
+                "This tab will populate automatically if either platform lists one."
+            )
 
     with tab_yearly:
         if view.kalshi_yearly:
