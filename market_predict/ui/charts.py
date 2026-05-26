@@ -1,11 +1,20 @@
 """Plotly figures consumed by the Streamlit app.
 
-Three charts, one per top-level concept:
-    - options_wall: call/put OI bars around spot, with vlines for key levels
-    - kalshi_distribution: probability histogram across brackets (daily or yearly)
-    - fed_path: horizontal stacked bars for the next FOMC meetings
+Each function takes the TickerView dataclass (or a slice of it) and returns a
+plotly Figure. Common style is applied via the COLORS palette and
+_apply_theme() helper so all charts share font / margins / template.
 
-Each function takes the TickerView dataclass and returns a plotly Figure.
+Color convention (deliberate, do not change without updating all charts):
+    - up / call OI / positive return: green
+    - down / put OI / negative return: red
+    - spot price: blue (vline / hline)
+    - call wall: green dashed
+    - put wall: red dashed
+    - max pain: gray dotted (distinct from Kalshi purple)
+    - gamma flip: orange dotted
+    - Kalshi data series: purple
+    - Polymarket data series: gold
+    - VIX line: violet
 """
 from __future__ import annotations
 
@@ -15,6 +24,41 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from market_predict.models import KalshiBracket, TickerView
+
+
+COLORS = {
+    "up": "#27ae60",
+    "down": "#c0392b",
+    "spot": "#2980b9",
+    "call_wall": "#16a085",
+    "put_wall": "#c0392b",
+    "max_pain": "#7f8c8d",
+    "gamma_flip": "#d35400",
+    "kalshi": "#8e44ad",
+    "kalshi_fill": "rgba(142, 68, 173, 0.55)",
+    "polymarket": "#f39c12",
+    "polymarket_fill": "rgba(243, 156, 18, 0.55)",
+    "vix": "#8e44ad",
+    "neutral_text": "#2c3e50",
+    "grid": "rgba(0,0,0,0.06)",
+}
+
+
+def _apply_theme(fig: go.Figure, *, title: str | None = None, height: int = 380) -> go.Figure:
+    """Apply a unified style: white template, compact margins, consistent fonts."""
+    fig.update_layout(
+        template="plotly_white",
+        title=dict(text=title, font=dict(size=14, color=COLORS["neutral_text"])) if title else None,
+        font=dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size=12),
+        height=height,
+        margin=dict(t=60 if title else 30, b=40, l=50, r=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        hoverlabel=dict(font_size=11),
+        xaxis=dict(gridcolor=COLORS["grid"], zerolinecolor=COLORS["grid"]),
+        yaxis=dict(gridcolor=COLORS["grid"], zerolinecolor=COLORS["grid"]),
+    )
+    return fig
 
 
 # ─────────────────────── price history (candle + volume) ───────────
@@ -35,16 +79,15 @@ def price_history(view: TickerView) -> go.Figure:
             x=df.index, open=df["Open"], high=df["High"],
             low=df["Low"], close=df["Close"],
             name=view.symbol,
-            increasing_line_color="#27ae60",
-            decreasing_line_color="#c0392b",
+            increasing_line_color=COLORS["up"],
+            decreasing_line_color=COLORS["down"],
             showlegend=False,
         ),
         row=1, col=1,
     )
 
-    # Volume bars colored by up/down day
     colors = [
-        "rgba(39, 174, 96, 0.5)" if c >= o else "rgba(192, 57, 43, 0.5)"
+        f"rgba(39, 174, 96, 0.45)" if c >= o else "rgba(192, 57, 43, 0.45)"
         for c, o in zip(df["Close"], df["Open"])
     ]
     fig.add_trace(
@@ -52,10 +95,10 @@ def price_history(view: TickerView) -> go.Figure:
         row=2, col=1,
     )
 
-    # Spot horizontal line on top chart
     fig.add_hline(
-        y=view.spot, line_color="#3498db", line_dash="dot", line_width=1,
+        y=view.spot, line_color=COLORS["spot"], line_dash="dot", line_width=1,
         annotation_text=f"spot ${view.spot:.2f}", annotation_position="right",
+        annotation_font_size=10, annotation_font_color=COLORS["spot"],
         row=1, col=1,
     )
 
@@ -64,19 +107,15 @@ def price_history(view: TickerView) -> go.Figure:
     low_3mo = df["Low"].min()
     pct_in_range = (view.spot - low_3mo) / (high_3mo - low_3mo) * 100 if high_3mo > low_3mo else 50
 
-    fig.update_layout(
-        title=(
-            f"{view.symbol} {n_days}-day history  |  "
-            f"3mo range ${low_3mo:.2f} – ${high_3mo:.2f}  |  "
-            f"spot at {pct_in_range:.0f}% of range"
-        ),
-        height=380,
-        xaxis_rangeslider_visible=False,
-        margin=dict(t=50, b=30, l=50, r=20),
-        showlegend=False,
+    title = (
+        f"{view.symbol} · {n_days}d history · "
+        f"3mo range ${low_3mo:.2f}–${high_3mo:.2f} · "
+        f"spot at {pct_in_range:.0f}% of range"
     )
-    fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    _apply_theme(fig, title=title, height=380)
+    fig.update_layout(xaxis_rangeslider_visible=False, showlegend=False)
+    fig.update_yaxes(title_text="Price", row=1, col=1, gridcolor=COLORS["grid"])
+    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor=COLORS["grid"])
     return fig
 
 
@@ -86,35 +125,27 @@ def price_history(view: TickerView) -> go.Figure:
 def vix_mini(view: TickerView) -> go.Figure:
     fig = go.Figure()
     if view.vix is None or view.vix.history_30d.empty:
-        fig.update_layout(title="VIX — no data")
-        return fig
+        return _apply_theme(fig, title="VIX — no data", height=200)
 
     df = view.vix.history_30d
     fig.add_trace(go.Scatter(
         x=df.index, y=df["Close"], mode="lines",
-        line=dict(color="#8e44ad", width=2),
+        line=dict(color=COLORS["vix"], width=2),
+        fill="tozeroy",
+        fillcolor="rgba(142, 68, 173, 0.08)",
         name="VIX",
         hovertemplate="%{x|%Y-%m-%d}: %{y:.2f}<extra></extra>",
     ))
     fig.add_hline(
-        y=view.vix.mean_30d, line_color="#95a5a6", line_dash="dash", line_width=1,
+        y=view.vix.mean_30d, line_color="rgba(0,0,0,0.35)", line_dash="dash", line_width=1,
         annotation_text=f"30d avg {view.vix.mean_30d:.1f}",
-        annotation_position="right",
+        annotation_position="right", annotation_font_size=10,
     )
-    # Reference bands at 15 / 20 / 30 (typical regime thresholds)
-    for level, label, color in [
-        (15, "calm", "rgba(39, 174, 96, 0.08)"),
-        (20, "normal", "rgba(241, 196, 15, 0.08)"),
-        (30, "stress", "rgba(192, 57, 43, 0.08)"),
-    ]:
-        fig.add_hline(y=level, line_color="rgba(0,0,0,0.15)", line_dash="dot", line_width=0.5)
+    for level in (15, 20, 30):
+        fig.add_hline(y=level, line_color="rgba(0,0,0,0.10)", line_dash="dot", line_width=0.5)
 
-    fig.update_layout(
-        title=f"VIX 30d — current {view.vix.current:.2f}",
-        height=200, margin=dict(t=40, b=20, l=40, r=20),
-        showlegend=False,
-        yaxis_title=None,
-    )
+    _apply_theme(fig, title=f"VIX 30d · current {view.vix.current:.2f}", height=200)
+    fig.update_layout(showlegend=False, yaxis_title=None, margin=dict(t=40, b=20, l=40, r=20))
     return fig
 
 
@@ -134,41 +165,45 @@ def options_wall(view: TickerView) -> go.Figure:
 
     fig.add_trace(go.Bar(
         x=calls.strike, y=calls.openInterest,
-        name="Call OI", marker_color="rgba(46, 204, 113, 0.7)",
+        name="Call OI", marker_color="rgba(39, 174, 96, 0.65)",
         hovertemplate="Strike $%{x:.0f}<br>Call OI %{y:,.0f}<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         x=puts.strike, y=-puts.openInterest,
-        name="Put OI (negative)", marker_color="rgba(231, 76, 60, 0.7)",
+        name="Put OI (−)", marker_color="rgba(192, 57, 43, 0.65)",
         hovertemplate="Strike $%{x:.0f}<br>Put OI %{y:,.0f}<extra></extra>",
     ))
 
     w = view.options_wall
+    # Alternate annotation position (top / bottom) so labels don't overlap
     levels = [
-        (spot, "spot", "#3498db", "solid"),
-        (w.call_wall_strike, f"call wall ${w.call_wall_strike:.0f}", "#27ae60", "dash"),
-        (w.put_wall_strike, f"put wall ${w.put_wall_strike:.0f}", "#c0392b", "dash"),
-        (w.max_pain, f"max pain ${w.max_pain:.0f}", "#9b59b6", "dot"),
+        (spot, f"spot ${spot:.0f}", COLORS["spot"], "solid", "top"),
+        (w.call_wall_strike, f"call wall ${w.call_wall_strike:.0f}", COLORS["call_wall"], "dash", "top right"),
+        (w.put_wall_strike, f"put wall ${w.put_wall_strike:.0f}", COLORS["put_wall"], "dash", "top left"),
+        (w.max_pain, f"max pain ${w.max_pain:.0f}", COLORS["max_pain"], "dot", "bottom"),
     ]
     if w.gamma_flip:
-        levels.append((w.gamma_flip, f"γ flip ${w.gamma_flip:.0f}", "#f39c12", "dot"))
+        levels.append((w.gamma_flip, f"γ flip ${w.gamma_flip:.0f}", COLORS["gamma_flip"], "dot", "bottom right"))
 
-    for x, text, color, dash in levels:
+    for x, text, color, dash, pos in levels:
         fig.add_vline(
             x=x, line_color=color, line_dash=dash, line_width=1.5,
-            annotation_text=text, annotation_position="top",
+            annotation_text=text, annotation_position=pos,
             annotation_font_size=10, annotation_font_color=color,
         )
 
+    title = (
+        f"Options walls · expiry {w.expiry} "
+        f"({(w.expiry - pd.Timestamp.today().date()).days}d) · "
+        f"ATM IV {w.atm_iv*100:.1f}%"
+    )
+    _apply_theme(fig, title=title, height=400)
     fig.update_layout(
-        title=f"Options walls — expiry {w.expiry} ({(w.expiry - pd.Timestamp.today().date()).days}d)  |  ATM IV {w.atm_iv*100:.1f}%",
         barmode="relative",
-        height=400,
         xaxis_title="Strike ($)",
-        yaxis_title="Open Interest (call+ / put−)",
+        yaxis_title="Open Interest (call + / put −)",
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=70, b=40, l=50, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
     )
     return fig
 
@@ -208,13 +243,13 @@ def kalshi_distribution(
             f"{b.strike_low:,.0f}–{b.strike_high:,.0f}<br>OI ${b.open_interest:,.0f}<br>vol24 ${b.volume_24h:,.0f}"
             for b in between
         ]
-        bar_width = (between[0].strike_high - between[0].strike_low) * 0.9 if len(between) else None
+        bar_width = (between[0].strike_high - between[0].strike_low) * 0.85 if len(between) else None
         fig.add_trace(go.Bar(
             x=xs, y=ys, width=bar_width,
             customdata=labels,
             hovertemplate="%{customdata}<br>P = %{y:.1f}%<extra></extra>",
-            marker_color="rgba(52, 152, 219, 0.75)",
-            name="P(strike-bucket)",
+            marker_color=COLORS["kalshi_fill"],
+            name="P(close in bucket)",
         ))
 
     max_y = max([b.yes_mid * 100 for b in between], default=10)
@@ -224,31 +259,29 @@ def kalshi_distribution(
         fig.add_annotation(
             x=b.strike_high, y=max_y * 0.9,
             text=f"<b>P(<{b.strike_high:,.0f}) = {b.yes_mid*100:.1f}%</b>",
-            showarrow=True, arrowhead=2, arrowcolor="#c0392b", ax=-40, ay=-30,
-            font=dict(color="#c0392b"),
+            showarrow=True, arrowhead=2, arrowcolor=COLORS["down"], ax=-40, ay=-30,
+            font=dict(color=COLORS["down"], size=11),
         )
     if above_rails:
         b = above_rails[0]
         fig.add_annotation(
             x=b.strike_low, y=max_y * 0.9,
             text=f"<b>P(>{b.strike_low:,.0f}) = {b.yes_mid*100:.1f}%</b>",
-            showarrow=True, arrowhead=2, arrowcolor="#27ae60", ax=40, ay=-30,
-            font=dict(color="#27ae60"),
+            showarrow=True, arrowhead=2, arrowcolor=COLORS["up"], ax=40, ay=-30,
+            font=dict(color=COLORS["up"], size=11),
         )
 
     fig.add_vline(
-        x=ref_value, line_color="#2c3e50", line_dash="solid", line_width=2,
+        x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
         annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
-        annotation_position="top",
+        annotation_position="top", annotation_font_color=COLORS["spot"],
     )
 
+    _apply_theme(fig, title=title, height=400)
     fig.update_layout(
-        title=title,
         xaxis_title=ref_name,
         yaxis_title="Probability (%)",
-        height=400,
         showlegend=False,
-        margin=dict(t=70, b=40, l=50, r=20),
     )
     return fig
 
@@ -257,16 +290,13 @@ def kalshi_distribution(
 
 
 def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figure:
-    """Two-line chart: HIGH-touch probability vs strike (green up), LOW-touch (red down).
+    """Two-line chart: P(HIGH touched) and P(LOW touched) by strike.
 
-    These are NOT a distribution — they are independent one-touch probabilities,
-    so each strike has its own touch-or-not bet. We plot them as connected lines
-    to show how probability decays with distance from spot.
+    Path-dependent one-touch — NOT a distribution. Each strike is its own bet.
     """
     fig = go.Figure()
     if poly_event is None or not poly_event.brackets:
-        fig.update_layout(title="Polymarket — no contracts for this underlying")
-        return fig
+        return _apply_theme(fig, title="Polymarket — no contracts for this underlying", height=400)
 
     high = sorted([b for b in poly_event.brackets if b.direction == "HIGH"], key=lambda b: b.strike)
     low = sorted([b for b in poly_event.brackets if b.direction == "LOW"], key=lambda b: b.strike, reverse=True)
@@ -277,7 +307,7 @@ def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figu
             y=[b.yes_price * 100 for b in high],
             mode="lines+markers",
             name="P(HIGH touched)",
-            line=dict(color="#27ae60", width=2),
+            line=dict(color=COLORS["up"], width=2.5),
             marker=dict(size=10),
             hovertemplate="Strike $%{x:,.0f}<br>P(touch HIGH) = %{y:.1f}%<extra></extra>",
         ))
@@ -287,25 +317,23 @@ def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figu
             y=[b.yes_price * 100 for b in low],
             mode="lines+markers",
             name="P(LOW touched)",
-            line=dict(color="#c0392b", width=2),
+            line=dict(color=COLORS["down"], width=2.5),
             marker=dict(size=10),
             hovertemplate="Strike $%{x:,.0f}<br>P(touch LOW) = %{y:.1f}%<extra></extra>",
         ))
 
     fig.add_vline(
-        x=ref_value, line_color="#2c3e50", line_dash="solid", line_width=2,
+        x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
         annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
-        annotation_position="top",
+        annotation_position="top", annotation_font_color=COLORS["spot"],
     )
 
+    _apply_theme(fig, title=f"Polymarket one-touch · {poly_event.title}", height=400)
     fig.update_layout(
-        title=f"Polymarket one-touch — {poly_event.title}",
         xaxis_title=ref_name,
         yaxis_title="P(touched by expiry) (%)",
         yaxis_range=[0, 100],
-        height=400,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=70, b=40, l=50, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
     )
     return fig
 
@@ -350,8 +378,8 @@ def daily_brackets_dual(
             x=xs, y=ys, width=width,
             customdata=labels,
             hovertemplate="%{customdata}<extra></extra>",
-            marker_color="rgba(155, 89, 182, 0.55)",  # Kalshi purple
-            name=f"Kalshi {underlying_name} brackets",
+            marker_color=COLORS["kalshi_fill"],
+            name="Kalshi brackets",
         ))
 
     # Polymarket cumulative → differenced brackets
@@ -378,14 +406,14 @@ def daily_brackets_dual(
             x=diff_x, y=diff_y, width=width_p,
             customdata=diff_lbl,
             hovertemplate="%{customdata}<extra></extra>",
-            marker_color="rgba(241, 196, 15, 0.55)",  # Polymarket gold
-            name=f"Polymarket {underlying_name} close above",
+            marker_color=COLORS["polymarket_fill"],
+            name="Polymarket close-above (differenced)",
         ))
 
     fig.add_vline(
-        x=spot, line_color="#3498db", line_dash="solid", line_width=2,
+        x=spot, line_color=COLORS["spot"], line_dash="solid", line_width=2,
         annotation_text=f"<b>spot ${spot:.2f}</b>",
-        annotation_position="top",
+        annotation_position="top", annotation_font_color=COLORS["spot"],
     )
 
     close_date = None
@@ -394,31 +422,37 @@ def daily_brackets_dual(
     elif kalshi_brackets:
         close_date = kalshi_brackets[0].close_time
 
+    _apply_theme(fig, title=f"Daily close brackets · resolves {close_date or 'today'}", height=380)
     fig.update_layout(
-        title=f"Daily close brackets — resolve {close_date or 'today'} (Kalshi 紫 / Polymarket 黄)",
-        xaxis_title=f"{underlying_name} close price (SPY-scale)",
+        xaxis_title=f"{view_symbol_for_axis(underlying_name)} close price",
         yaxis_title="Probability (%)",
-        height=380,
         barmode="overlay",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
-        margin=dict(t=70, b=40, l=50, r=20),
     )
     return fig
+
+
+def view_symbol_for_axis(underlying_name: str) -> str:
+    """Friendlier axis label: 'S&P 500' → 'SPY', 'Nasdaq 100' → 'QQQ'."""
+    mapping = {"S&P 500": "SPY", "Nasdaq 100": "QQQ"}
+    return mapping.get(underlying_name, underlying_name)
 
 
 # ───────────────── Kalshi rate cut count / event outcomes ───────────
 
 
-def kalshi_event_outcomes_bar(meeting, title: str, color: str = "#9b59b6") -> go.Figure:
-    """Horizontal bar of outcome probabilities for a Kalshi multi-outcome event
-    (rate cut count, FOMC decision, etc.). Reuses FedMeeting dataclass."""
+def kalshi_event_outcomes_bar(meeting, title: str, color: str | None = None) -> go.Figure:
+    """Horizontal bar of outcome probabilities for a Kalshi multi-outcome event.
+
+    The color argument defaults to Kalshi purple. Pass COLORS["polymarket"] when
+    rendering a Polymarket-sourced event for consistent venue color coding.
+    """
     fig = go.Figure()
     if meeting is None or not meeting.outcomes:
-        fig.update_layout(title=f"{title} — no data")
-        return fig
-    outcomes = sorted(meeting.outcomes, key=lambda o: -o.yes_mid)
-    # Show top 8 by probability so chart stays readable
-    outcomes = outcomes[:8]
+        return _apply_theme(fig, title=f"{title} — no data", height=300)
+    if color is None:
+        color = COLORS["kalshi"]
+    outcomes = sorted(meeting.outcomes, key=lambda o: -o.yes_mid)[:8]
     fig.add_trace(go.Bar(
         y=[o.title for o in outcomes],
         x=[o.yes_mid * 100 for o in outcomes],
@@ -429,11 +463,10 @@ def kalshi_event_outcomes_bar(meeting, title: str, color: str = "#9b59b6") -> go
         hovertemplate="%{y}<br>P = %{x:.1f}%<br>OI $%{customdata:,.0f}<extra></extra>",
         customdata=[o.open_interest for o in outcomes],
     ))
+    _apply_theme(fig, title=f"{title} · resolves {meeting.close_time}", height=300)
     fig.update_layout(
-        title=f"{title} (resolve {meeting.close_time})",
-        height=300,
         xaxis_title="P (%)",
-        yaxis=dict(autorange="reversed"),  # highest at top
+        yaxis=dict(autorange="reversed"),
         margin=dict(t=50, b=40, l=140, r=40),
         showlegend=False,
     )
@@ -454,29 +487,37 @@ def recession_gauge(kalshi_recession_list) -> go.Figure:
     current = sorted(kalshi_recession_list, key=lambda b: b.close_time)[0]
     p = current.yes_mid * 100
 
+    # Pretty event label: 'KXRECSSNBER-26' → 'NBER recession 2026'
+    label = current.event_ticker.replace("KXRECSSNBER-", "")
+    if label.isdigit():
+        label = f"20{label}" if len(label) == 2 else label
+
     fig.add_trace(go.Indicator(
         mode="gauge+number",
         value=p,
-        number={"suffix": "%", "font": {"size": 36}},
-        title={"text": f"NBER recession ({current.event_ticker})", "font": {"size": 14}},
+        number={"suffix": "%", "font": {"size": 40, "color": COLORS["neutral_text"]}},
+        title={"text": f"NBER recession · {label}", "font": {"size": 14, "color": COLORS["neutral_text"]}},
         gauge={
-            "axis": {"range": [0, 100], "tickwidth": 1},
-            "bar": {"color": "#c0392b" if p > 30 else ("#f39c12" if p > 15 else "#27ae60")},
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": COLORS["neutral_text"]},
+            "bar": {"color": COLORS["down"] if p > 30 else (COLORS["gamma_flip"] if p > 15 else COLORS["up"])},
+            "bgcolor": "rgba(0,0,0,0)",
+            "borderwidth": 0,
             "steps": [
-                {"range": [0, 15], "color": "rgba(39, 174, 96, 0.18)"},
+                {"range": [0, 15], "color": "rgba(39, 174, 96, 0.15)"},
                 {"range": [15, 30], "color": "rgba(241, 196, 15, 0.18)"},
-                {"range": [30, 100], "color": "rgba(192, 57, 43, 0.18)"},
+                {"range": [30, 100], "color": "rgba(192, 57, 43, 0.15)"},
             ],
             "threshold": {
-                "line": {"color": "#3498db", "width": 3},
+                "line": {"color": COLORS["spot"], "width": 3},
                 "thickness": 0.75,
-                "value": 16.5,  # historical baseline avg
+                "value": 16.5,  # historical 16.5% base rate
             },
         },
     ))
     fig.update_layout(
-        height=260,
+        height=280,
         margin=dict(t=40, b=20, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
     )
     return fig
 
@@ -485,26 +526,32 @@ def recession_gauge(kalshi_recession_list) -> go.Figure:
 
 
 def mag7_ranking_bar(poly_largest_event) -> go.Figure:
-    """Horizontal bar showing 'Will [company] be largest?' probabilities."""
+    """Horizontal bar of 'Will [company] be largest?' probabilities, gradient-colored."""
     fig = go.Figure()
     if poly_largest_event is None or not poly_largest_event.rows:
-        fig.update_layout(title="Largest company — no data")
-        return fig
+        return _apply_theme(fig, title="Largest company — no data", height=340)
 
     rows = poly_largest_event.rows[:10]
+    # Gradient from darker (highest probability) to lighter
+    max_p = max((r.yes_price for r in rows), default=1) or 1
+    colors_list = []
+    for r in rows:
+        intensity = 0.35 + 0.55 * (r.yes_price / max_p)  # 0.35 ~ 0.90
+        colors_list.append(f"rgba(243, 156, 18, {intensity:.2f})")
+
     fig.add_trace(go.Bar(
         y=[r.name for r in rows],
         x=[r.yes_price * 100 for r in rows],
         orientation="h",
         text=[f"{r.yes_price * 100:.1f}%" for r in rows],
         textposition="outside",
-        marker_color="rgba(241, 196, 15, 0.85)",
+        marker_color=colors_list,
+        marker_line=dict(color=COLORS["polymarket"], width=1),
         hovertemplate="%{y}<br>P(largest) = %{x:.1f}%<br>vol24 $%{customdata:,.0f}<extra></extra>",
         customdata=[r.volume_24h for r in rows],
     ))
+    _apply_theme(fig, title=f"{poly_largest_event.title} · Polymarket", height=340)
     fig.update_layout(
-        title=f"{poly_largest_event.title} (Polymarket)",
-        height=340,
         xaxis_title="P(largest company) %",
         yaxis=dict(autorange="reversed"),
         margin=dict(t=50, b=40, l=80, r=60),
@@ -536,19 +583,18 @@ def fed_path(view: TickerView) -> go.Figure:
     if df.empty:
         return fig
 
-    # Stable color per outcome label
     palette = {
-        "hold": "#7f8c8d",
-        "maintain": "#7f8c8d",
-        "cut": "#3498db",
-        "hike": "#e74c3c",
+        "hold": "#95a5a6",
+        "maintain": "#95a5a6",
+        "cut": COLORS["spot"],
+        "hike": COLORS["down"],
     }
     def color_for(label: str) -> str:
         low = label.lower()
         for key, color in palette.items():
             if key in low:
                 return color
-        return "#95a5a6"
+        return "#bdc3c7"
 
     for outcome in df["outcome"].unique():
         sub = df[df["outcome"] == outcome]
@@ -558,17 +604,17 @@ def fed_path(view: TickerView) -> go.Figure:
             marker_color=color_for(outcome),
             text=[f"{p:.0f}%" if p >= 5 else "" for p in sub["prob"]],
             textposition="inside",
+            insidetextfont=dict(color="white", size=11),
             hovertemplate=f"{outcome}<br>%{{x:.1f}}%<br>OI $%{{customdata:,.0f}}<extra></extra>",
             customdata=sub["oi"],
         ))
 
+    _apply_theme(fig, title="Fed path · next FOMC meetings (Kalshi)", height=300)
     fig.update_layout(
-        title="Fed path — next FOMC meetings (Kalshi KXFEDDECISION)",
         barmode="stack",
-        height=300,
         xaxis_title="Probability (%)",
         yaxis_title="",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
-        margin=dict(t=50, b=60, l=80, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=10)),
+        margin=dict(t=50, b=70, l=110, r=20),
     )
     return fig

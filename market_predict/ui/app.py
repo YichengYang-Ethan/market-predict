@@ -58,19 +58,21 @@ def _short_rate_cuts_outcome(question: str) -> str:
 # ────────────────────── Header (title + controls) ─────────────────────
 
 
-st.title("📊 market-predict")
-st.caption(
-    "SPY/QQQ trader context: spot + options walls + Kalshi/Polymarket predictions + Fed. "
-    "All sources free, public, no auth."
+st.markdown(
+    "<h1 style='margin-bottom:0;'>market-predict</h1>"
+    "<p style='color:#7f8c8d;font-size:0.9em;margin-top:0;'>"
+    "SPY/QQQ trader context · spot · options walls · Kalshi & Polymarket predictions · Fed. "
+    "All sources free and public.</p>",
+    unsafe_allow_html=True,
 )
 
-ctrl_l, ctrl_r = st.columns([4, 1])
+ctrl_l, ctrl_r = st.columns([5, 1])
 with ctrl_l:
     symbol = st.selectbox(
         "Ticker", list(TICKER_MAP.keys()), index=0, label_visibility="collapsed"
     )
 with ctrl_r:
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("Refresh", use_container_width=True):
         load_view.clear()
         st.rerun()
 
@@ -87,7 +89,7 @@ cfg = get_config(symbol)
 # ─────────────────────────── HEADER METRICS ──────────────────────────
 
 
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric(view.symbol, f"${view.spot:.2f}")
 m2.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
 if view.futures is not None:
@@ -97,18 +99,21 @@ if view.futures is not None:
         f"{view.futures.change_pct:+.2f}% o/n",
     )
 else:
-    m3.metric("fut", "n/a")
+    m3.metric("Futures", "n/a")
 if view.vix is not None:
     vix_delta = view.vix.current - view.vix.mean_30d
-    m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f}", delta_color="inverse")
+    m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f} vs 30d avg", delta_color="inverse")
 else:
     m4.metric("VIX", "n/a")
 if view.options_wall:
     m5.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
+    pc = view.options_wall.total_put_oi / max(view.options_wall.total_call_oi, 1)
+    m6.metric("P/C OI", f"{pc:.2f}")
 else:
     m5.metric("ATM IV", "n/a")
+    m6.metric("P/C OI", "n/a")
 
-st.divider()
+st.markdown("")  # subtle spacer instead of divider
 
 
 # ───────────────────── ROW 1: K-line + VIX mini ─────────────────────
@@ -124,7 +129,7 @@ with row1_r:
 # ───────────────────── ROW 2: Options walls + key levels ────────────
 
 
-st.subheader("Options walls")
+st.markdown("##### Options walls")
 if view.options_wall:
     row2_l, row2_r = st.columns([2.5, 1])
     with row2_l:
@@ -138,18 +143,16 @@ if view.options_wall:
             "Gamma flip",
             f"${w.gamma_flip:.0f}" if w.gamma_flip is not None else "n/a",
         )
-        pc = w.total_put_oi / max(w.total_call_oi, 1)
-        st.metric("Put/Call OI", f"{pc:.2f}")
 else:
     st.info("No options chain available for this ticker.")
 
-st.divider()
+st.markdown("")
 
 
 # ───────────── ROW 3: Today's direction (Kalshi + Poly daily) ────────
 
 
-st.subheader("Today's direction — dual-source")
+st.markdown("##### Today's direction · dual-source")
 row3_l, row3_r = st.columns([2.5, 1])
 
 with row3_l:
@@ -194,13 +197,13 @@ with row3_r:
         st.metric("P(open UP)", "n/a")
         st.caption("Polymarket premarket event not active right now.")
 
-st.divider()
+st.markdown("")
 
 
 # ───────────── ROW 4: Fed/rates (3 panels) ────────────
 
 
-st.subheader("Fed / rates")
+st.markdown("##### Fed & rates")
 row4_a, row4_b, row4_c = st.columns([2, 1, 1])
 
 with row4_a:
@@ -210,15 +213,13 @@ with row4_b:
     st.plotly_chart(
         charts.kalshi_event_outcomes_bar(
             view.kalshi_rate_cut_count,
-            title="Kalshi: 2026 rate cuts count",
-            color="rgba(155, 89, 182, 0.85)",
+            title="Kalshi · 2026 rate cuts count",
         ),
         use_container_width=True,
     )
 
 with row4_c:
     if view.polymarket_fed_decision is not None:
-        # Wrap PolyOutcomeEvent into FedMeeting-like for the same chart fn
         from market_predict.models import FedMeeting, FedOutcome
         wrapped = FedMeeting(
             event_ticker=view.polymarket_fed_decision.slug,
@@ -237,22 +238,22 @@ with row4_c:
         st.plotly_chart(
             charts.kalshi_event_outcomes_bar(
                 wrapped,
-                title="Poly: next FOMC",
-                color="rgba(241, 196, 15, 0.85)",
+                title="Polymarket · next FOMC",
+                color=charts.COLORS["polymarket"],
             ),
             use_container_width=True,
         )
     else:
         st.info("Polymarket Fed Decision event not found.")
 
-st.divider()
+st.markdown("")
 
 
 # ─────────────────────────── TABS row ───────────────────────────────
 
 
 tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
-    ["📅 Monthly", "📆 Yearly", "🌍 Macro / Recession", "🚀 Mag 7", "🏛 2026 Cuts"]
+    ["Monthly", "Yearly", "Macro / Recession", "Mag 7", "2026 Cuts"]
 )
 
 with tab_monthly:
@@ -266,7 +267,7 @@ with tab_monthly:
             use_container_width=True,
         )
         st.caption(
-            f"📌 **One-touch contracts**: Yes resolves if the underlying touches "
+            f"**One-touch contracts** · Yes resolves if the underlying touches "
             f"the strike at any point before {view.polymarket_monthly.end_date}. "
             f"Not mutually exclusive — each strike is its own bet. "
             f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
@@ -348,7 +349,7 @@ with tab_mag7:
     )
     if view.polymarket_largest_company:
         st.caption(
-            f"📌 **{view.polymarket_largest_company.title}** — "
+            f"**{view.polymarket_largest_company.title}** · "
             f"event vol24 ≈ ${view.polymarket_largest_company.volume_24h:,.0f}. "
             f"Source: Polymarket. NVDA/AAPL/MSFT/etc. dominate S&P 500 weight, so this ranks "
             f"the AI-theme winner."
@@ -374,22 +375,21 @@ with tab_rates_2026:
         st.plotly_chart(
             charts.kalshi_event_outcomes_bar(
                 wrapped,
-                title="Polymarket: How many Fed rate cuts in 2026?",
-                color="rgba(241, 196, 15, 0.85)",
+                title="Polymarket · How many Fed rate cuts in 2026?",
+                color=charts.COLORS["polymarket"],
             ),
             use_container_width=True,
         )
         st.caption(
-            f"📌 Compare to Kalshi `KXRATECUTCOUNT` in the row above — same question, "
-            f"two platforms. event vol24 ≈ ${view.polymarket_rate_cuts_2026.volume_24h:,.0f}."
+            f"Compare to Kalshi `KXRATECUTCOUNT` in the Fed row above — same question, "
+            f"two platforms. Event vol24 ≈ ${view.polymarket_rate_cuts_2026.volume_24h:,.0f}."
         )
     else:
         st.info("Polymarket 'rate cuts in 2026' event not found.")
 
-st.divider()
-
+st.markdown("---")
 st.caption(
-    f"Last fetch: {view.timestamp:%Y-%m-%d %H:%M}  ·  "
-    f"data: yfinance + Kalshi + Polymarket  ·  "
-    f"cache TTL: 5 min"
+    f"Last fetch · {view.timestamp:%Y-%m-%d %H:%M}  ·  "
+    f"sources · yfinance + Kalshi + Polymarket  ·  "
+    f"cache TTL · 5 min"
 )
