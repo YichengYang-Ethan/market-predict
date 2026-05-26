@@ -85,13 +85,22 @@ with st.spinner(f"Fetching {symbol} data..."):
 
 cfg = get_config(symbol)
 
+# Warn (don't stop) when yfinance is rate-limited — Kalshi/Polymarket panels
+# can still render. Streamlit Cloud's shared IP pool hits Yahoo throttles often.
+if not view.spot or not view.underlying_value:
+    st.warning(
+        "Yahoo Finance is rate-limiting this host (common on Streamlit Cloud's "
+        "shared IPs). Spot/options/VIX panels will show 'n/a' — Kalshi and "
+        "Polymarket panels below are unaffected. Try Refresh in a few minutes."
+    )
+
 
 # ─────────────────────────── HEADER METRICS ──────────────────────────
 
 
 m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric(view.symbol, f"${view.spot:.2f}")
-m2.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
+m1.metric(view.symbol, f"${view.spot:.2f}" if view.spot else "n/a")
+m2.metric(view.underlying_name, f"{view.underlying_value:,.2f}" if view.underlying_value else "n/a")
 if view.futures is not None:
     m3.metric(
         f"{view.futures.name} fut",

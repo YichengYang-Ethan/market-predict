@@ -40,20 +40,39 @@ def build_view(symbol: str) -> TickerView:
     cfg = get_config(symbol)
 
     print(f"Fetching {symbol} spot + chain ...", file=sys.stderr)
-    spot = get_spot(symbol)
-    expirations = list_expirations(symbol)
-    expiry = pick_near_monthly_expiry(expirations)
+    spot = 0.0
+    expiry = None
     wall = None
     calls = puts = None
-    if expiry:
-        calls, puts = get_options_chain(symbol, expiry)
-        wall = compute_wall(spot, expiry, calls, puts)
+    try:
+        spot = get_spot(symbol)
+    except Exception as exc:
+        print(f"  (spot fetch failed: {exc})", file=sys.stderr)
+    try:
+        expirations = list_expirations(symbol)
+        expiry = pick_near_monthly_expiry(expirations)
+    except Exception as exc:
+        print(f"  (expirations fetch failed: {exc})", file=sys.stderr)
+    if expiry and spot:
+        try:
+            calls, puts = get_options_chain(symbol, expiry)
+            wall = compute_wall(spot, expiry, calls, puts)
+        except Exception as exc:
+            print(f"  (options chain failed: {exc})", file=sys.stderr)
 
     print(f"Fetching underlying {cfg['underlying_symbol']} ...", file=sys.stderr)
-    underlying_value = float(yf.Ticker(cfg["underlying_symbol"]).fast_info.last_price)
+    underlying_value = 0.0
+    try:
+        underlying_value = float(yf.Ticker(cfg["underlying_symbol"]).fast_info.last_price)
+    except Exception as exc:
+        print(f"  (underlying fetch failed: {exc})", file=sys.stderr)
 
     print(f"Fetching {symbol} 3mo history ...", file=sys.stderr)
-    history = get_history(symbol, period="3mo")
+    history = None
+    try:
+        history = get_history(symbol, period="3mo")
+    except Exception as exc:
+        print(f"  (history fetch failed: {exc})", file=sys.stderr)
 
     print(f"Fetching VIX ...", file=sys.stderr)
     vix = get_vix()
@@ -62,10 +81,16 @@ def build_view(symbol: str) -> TickerView:
     futures = get_futures(cfg["futures_symbol"], cfg["futures_name"])
 
     print(f"Fetching Kalshi {cfg['kalshi_yearly']} (yearly) ...", file=sys.stderr)
-    yearly = fetch_brackets(cfg["kalshi_yearly"])
+    try:
+        yearly = fetch_brackets(cfg["kalshi_yearly"])
+    except Exception as exc:
+        print(f"  (kalshi yearly failed: {exc})", file=sys.stderr); yearly = []
 
     print(f"Fetching Kalshi {cfg['kalshi_daily']} (daily) ...", file=sys.stderr)
-    daily = fetch_brackets(cfg["kalshi_daily"])
+    try:
+        daily = fetch_brackets(cfg["kalshi_daily"])
+    except Exception as exc:
+        print(f"  (kalshi daily failed: {exc})", file=sys.stderr); daily = []
 
     print(f"Fetching Polymarket monthly one-touch ...", file=sys.stderr)
     try:
@@ -82,7 +107,10 @@ def build_view(symbol: str) -> TickerView:
         poly_daily = None
 
     print(f"Fetching Fed path ...", file=sys.stderr)
-    meetings = fetch_fed_meetings()
+    try:
+        meetings = fetch_fed_meetings()
+    except Exception as exc:
+        print(f"  (fed path failed: {exc})", file=sys.stderr); meetings = []
 
     # ─── v2 additions ───
     print(f"Fetching Kalshi rate-cut count + recession + year MAX/MIN ...", file=sys.stderr)

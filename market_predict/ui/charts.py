@@ -271,11 +271,12 @@ def kalshi_distribution(
             font=dict(color=COLORS["up"], size=11),
         )
 
-    fig.add_vline(
-        x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
-        annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
-        annotation_position="top", annotation_font_color=COLORS["spot"],
-    )
+    if ref_value:
+        fig.add_vline(
+            x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
+            annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
+            annotation_position="top", annotation_font_color=COLORS["spot"],
+        )
 
     _apply_theme(fig, title=title, height=400)
     fig.update_layout(
@@ -322,11 +323,12 @@ def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figu
             hovertemplate="Strike $%{x:,.0f}<br>P(touch LOW) = %{y:.1f}%<extra></extra>",
         ))
 
-    fig.add_vline(
-        x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
-        annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
-        annotation_position="top", annotation_font_color=COLORS["spot"],
-    )
+    if ref_value:
+        fig.add_vline(
+            x=ref_value, line_color=COLORS["spot"], line_dash="solid", line_width=2,
+            annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
+            annotation_position="top", annotation_font_color=COLORS["spot"],
+        )
 
     _apply_theme(fig, title=f"Polymarket one-touch · {poly_event.title}", height=400)
     fig.update_layout(
@@ -429,11 +431,12 @@ def daily_brackets_dual(
                 name="Polymarket (differenced)",
             ))
 
-    fig.add_vline(
-        x=spot, line_color=COLORS["spot"], line_dash="solid", line_width=2,
-        annotation_text=f"<b>spot ${spot:.2f}</b>",
-        annotation_position="top", annotation_font_color=COLORS["spot"],
-    )
+    if spot:
+        fig.add_vline(
+            x=spot, line_color=COLORS["spot"], line_dash="solid", line_width=2,
+            annotation_text=f"<b>spot ${spot:.2f}</b>",
+            annotation_position="top", annotation_font_color=COLORS["spot"],
+        )
 
     close_date = None
     if poly_close_brackets:
