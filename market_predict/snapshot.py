@@ -102,9 +102,21 @@ def load_snapshot(path: Path):
         raw = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None
+    return _materialize(raw)
+
+
+def load_snapshot_from_text(text: str):
+    """Parse a JSON string (e.g. from raw.githubusercontent.com) into a view."""
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return _materialize(raw)
+
+
+def _materialize(raw: dict):
     if raw.get("schema_version") != 1:
         return None
     view = _decode(raw["view"])
-    # Stamp where it came from so the UI can show "snapshot @ ..." caption
     view._snapshot_generated_at = raw.get("generated_at")
     return view

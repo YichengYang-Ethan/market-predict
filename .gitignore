@@ -8,3 +8,6 @@ __pycache__/
 *.parquet
 snapshots/
 .DS_Store
+# Snapshot JSON lives on the `snapshots` branch, never on main.
+# Local builds may produce data/snapshot_*.json for dev — ignore them.
+data/snapshot_*.json

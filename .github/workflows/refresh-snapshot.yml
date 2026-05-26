@@ -1,10 +1,11 @@
 name: Refresh market snapshots
 
+# Pushes snapshot JSON to a dedicated `snapshots` branch (NOT main) so the
+# Streamlit Cloud webhook doesn't trigger a redeploy every 15 min. The
+# Streamlit app reads snapshots from raw.githubusercontent.com/.../snapshots.
+
 on:
   schedule:
-    # GitHub Actions cron is best-effort (often delayed 5-15 min under load).
-    # 15-min cadence gives ~1 commit/quarter-hour and stays well under the
-    # public-repo unlimited-minutes budget.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
@@ -18,9 +19,10 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main (for code)
+        uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -33,14 +35,36 @@ jobs:
       - name: Build snapshots
         run: python -m market_predict.refresh_snapshot
 
-      - name: Commit if changed
+      - name: Push snapshots to dedicated branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           git config user.name "snapshot-bot"
           git config user.email "snapshot-bot@users.noreply.github.com"
-          git add data/snapshot_*.json
+
+          # Stash the freshly built snapshots somewhere outside the worktree
+          mkdir -p /tmp/snaps
+          cp data/snapshot_*.json /tmp/snaps/
+
+          # Either fetch the existing `snapshots` branch, or create it orphan
+          if git ls-remote --exit-code --heads origin snapshots >/dev/null 2>&1; then
+            git fetch origin snapshots:snapshots
+            git checkout snapshots
+            git rm -rf data/ 2>/dev/null || true
+          else
+            git checkout --orphan snapshots
+            # Wipe the working tree (orphan inherits main's files)
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p data
+          cp /tmp/snaps/*.json data/
+
+          git add data/
           if ! git diff --quiet --cached; then
             git commit -m "snap: $(date -u +%FT%TZ)"
-            git push
+            git push origin snapshots
           else
             echo "No snapshot diffs — skipping commit."
           fi

@@ -10,38 +10,54 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import requests
 import streamlit as st
 
 from market_predict.cli import build_view
-from market_predict.snapshot import load_snapshot
+from market_predict.snapshot import load_snapshot, load_snapshot_from_text
 from market_predict.tickers import TICKER_MAP, get_config
 from market_predict.ui import charts
 
 
 st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
 
-# Repo-root /data/snapshot_<sym>.json populated by the GitHub Actions cron.
-# If present and < 30 min old, we skip the 13-second live fetch entirely.
-SNAPSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-SNAPSHOT_MAX_AGE_SEC = 30 * 60
+# Snapshot pipeline:
+# - A GitHub Actions cron writes data/snapshot_<SYM>.json to the `snapshots`
+#   branch (deliberately not main, to avoid Streamlit Cloud redeploys every
+#   15 min). Streamlit pulls those files over HTTP from raw.githubusercontent.
+# - Locally, `data/snapshot_<SYM>.json` is used as a dev override.
+# - If both miss, we fall back to a slow live `build_view`.
+SNAPSHOT_URL = (
+    "https://raw.githubusercontent.com/YichengYang-Ethan/market-predict/"
+    "snapshots/data/snapshot_{symbol}.json"
+)
+SNAPSHOT_DIR_LOCAL = Path(__file__).resolve().parent.parent.parent / "data"
 
 
-# 15-min cache — once one visitor warms the shared Streamlit Cloud instance,
-# the next several get the page instantly.
 @st.cache_data(ttl=900, show_spinner=False)
 def load_view(symbol: str):
-    import time
-    snap_path = SNAPSHOT_DIR / f"snapshot_{symbol}.json"
-    if snap_path.exists():
-        age = time.time() - snap_path.stat().st_mtime
-        if age < SNAPSHOT_MAX_AGE_SEC:
-            snap = load_snapshot(snap_path)
+    # Local dev override
+    local = SNAPSHOT_DIR_LOCAL / f"snapshot_{symbol}.json"
+    if local.exists():
+        snap = load_snapshot(local)
+        if snap is not None:
+            snap._source = "snapshot (local file)"
+            return snap
+
+    # Remote snapshot from the dedicated `snapshots` branch
+    try:
+        r = requests.get(SNAPSHOT_URL.format(symbol=symbol), timeout=5)
+        if r.ok:
+            snap = load_snapshot_from_text(r.text)
             if snap is not None:
-                snap._source = "snapshot"
+                snap._source = "snapshot (GitHub)"
                 return snap
-    # Live fetch fallback (slow path: ~13s)
+    except requests.RequestException:
+        pass
+
+    # Last resort: live fetch (~13s)
     view = build_view(symbol)
-    view._source = "live"
+    view._source = "live fetch"
     return view
 
 
@@ -421,11 +437,12 @@ with tab_rates_2026:
 st.markdown("---")
 _ts = view.timestamp
 _ts_str = _ts.strftime("%Y-%m-%d %H:%M") if hasattr(_ts, "strftime") else str(_ts)[:16]
-_source_label = (
-    "📦 snapshot (refreshed every 15 min by GitHub Actions)"
-    if getattr(view, "_source", "live") == "snapshot"
-    else "🛰️ live fetch (Kalshi + Polymarket + yfinance)"
-)
+_source = getattr(view, "_source", "live fetch")
+_source_label = {
+    "snapshot (GitHub)": "📦 snapshot (GitHub Actions, refreshed every 15 min)",
+    "snapshot (local file)": "📦 snapshot (local dev file)",
+    "live fetch": "🛰️ live fetch (Kalshi + Polymarket + yfinance)",
+}.get(_source, _source)
 st.caption(
     f"Data · {_ts_str}  ·  {_source_label}  ·  cache TTL · 15 min"
 )
