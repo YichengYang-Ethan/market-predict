@@ -10,8 +10,11 @@ from market_predict.render import render
 from market_predict.sources.kalshi import fetch_brackets, fetch_fed_meetings
 from market_predict.sources.polymarket import fetch_daily_up_down, fetch_monthly_one_touch
 from market_predict.sources.yfin import (
+    get_futures,
+    get_history,
     get_options_chain,
     get_spot,
+    get_vix,
     list_expirations,
     pick_near_monthly_expiry,
 )
@@ -34,6 +37,15 @@ def build_view(symbol: str) -> TickerView:
 
     print(f"Fetching underlying {cfg['underlying_symbol']} ...", file=sys.stderr)
     underlying_value = float(yf.Ticker(cfg["underlying_symbol"]).fast_info.last_price)
+
+    print(f"Fetching {symbol} 3mo history ...", file=sys.stderr)
+    history = get_history(symbol, period="3mo")
+
+    print(f"Fetching VIX ...", file=sys.stderr)
+    vix = get_vix()
+
+    print(f"Fetching futures {cfg['futures_symbol']} ...", file=sys.stderr)
+    futures = get_futures(cfg["futures_symbol"], cfg["futures_name"])
 
     print(f"Fetching Kalshi {cfg['kalshi_yearly']} (yearly) ...", file=sys.stderr)
     yearly = fetch_brackets(cfg["kalshi_yearly"])
@@ -73,6 +85,9 @@ def build_view(symbol: str) -> TickerView:
         calls_chain=calls,
         puts_chain=puts,
         options_expiry=expiry,
+        history=history,
+        vix=vix,
+        futures=futures,
     )
 
 

@@ -11,12 +11,16 @@ TICKER_MAP: dict[str, dict[str, str]] = {
         "underlying_name": "S&P 500",
         "kalshi_yearly": "KXINXY",
         "kalshi_daily": "KXINX",
+        "futures_symbol": "ES=F",      # E-mini S&P 500 futures
+        "futures_name": "ES",
     },
     "QQQ": {
         "underlying_symbol": "^NDX",
         "underlying_name": "Nasdaq 100",
         "kalshi_yearly": "KXNASDAQ100Y",
         "kalshi_daily": "KXNASDAQ100",
+        "futures_symbol": "NQ=F",      # E-mini Nasdaq 100 futures
+        "futures_name": "NQ",
     },
 }
 

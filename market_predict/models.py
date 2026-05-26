@@ -64,6 +64,10 @@ class TickerView:
     # free of source-specific imports. May be None if no contract available.
     polymarket_monthly: Optional[Any] = None
     polymarket_daily_updown: Optional[Any] = None
+    # 3-month OHLCV history (yfinance), VIX snapshot, futures snapshot — all optional.
+    history: Optional[Any] = None
+    vix: Optional[Any] = None
+    futures: Optional[Any] = None
     # Optional raw chain (typed Any to avoid hard pandas import in models)
     # Used by the Streamlit UI to draw per-strike OI bars; CLI does not consume.
     calls_chain: Optional[Any] = None

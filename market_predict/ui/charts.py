@@ -12,7 +12,110 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
+from plotly.subplots import make_subplots
+
 from market_predict.models import KalshiBracket, TickerView
+
+
+# ─────────────────────── price history (candle + volume) ───────────
+
+
+def price_history(view: TickerView) -> go.Figure:
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.75, 0.25], vertical_spacing=0.03,
+    )
+    df = view.history
+    if df is None or df.empty:
+        fig.update_layout(title=f"{view.symbol} — no history")
+        return fig
+
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index, open=df["Open"], high=df["High"],
+            low=df["Low"], close=df["Close"],
+            name=view.symbol,
+            increasing_line_color="#27ae60",
+            decreasing_line_color="#c0392b",
+            showlegend=False,
+        ),
+        row=1, col=1,
+    )
+
+    # Volume bars colored by up/down day
+    colors = [
+        "rgba(39, 174, 96, 0.5)" if c >= o else "rgba(192, 57, 43, 0.5)"
+        for c, o in zip(df["Close"], df["Open"])
+    ]
+    fig.add_trace(
+        go.Bar(x=df.index, y=df["Volume"], marker_color=colors, name="Vol", showlegend=False),
+        row=2, col=1,
+    )
+
+    # Spot horizontal line on top chart
+    fig.add_hline(
+        y=view.spot, line_color="#3498db", line_dash="dot", line_width=1,
+        annotation_text=f"spot ${view.spot:.2f}", annotation_position="right",
+        row=1, col=1,
+    )
+
+    n_days = len(df)
+    high_3mo = df["High"].max()
+    low_3mo = df["Low"].min()
+    pct_in_range = (view.spot - low_3mo) / (high_3mo - low_3mo) * 100 if high_3mo > low_3mo else 50
+
+    fig.update_layout(
+        title=(
+            f"{view.symbol} {n_days}-day history  |  "
+            f"3mo range ${low_3mo:.2f} – ${high_3mo:.2f}  |  "
+            f"spot at {pct_in_range:.0f}% of range"
+        ),
+        height=380,
+        xaxis_rangeslider_visible=False,
+        margin=dict(t=50, b=30, l=50, r=20),
+        showlegend=False,
+    )
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    return fig
+
+
+# ─────────────────────────── VIX mini ───────────────────────────────
+
+
+def vix_mini(view: TickerView) -> go.Figure:
+    fig = go.Figure()
+    if view.vix is None or view.vix.history_30d.empty:
+        fig.update_layout(title="VIX — no data")
+        return fig
+
+    df = view.vix.history_30d
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Close"], mode="lines",
+        line=dict(color="#8e44ad", width=2),
+        name="VIX",
+        hovertemplate="%{x|%Y-%m-%d}: %{y:.2f}<extra></extra>",
+    ))
+    fig.add_hline(
+        y=view.vix.mean_30d, line_color="#95a5a6", line_dash="dash", line_width=1,
+        annotation_text=f"30d avg {view.vix.mean_30d:.1f}",
+        annotation_position="right",
+    )
+    # Reference bands at 15 / 20 / 30 (typical regime thresholds)
+    for level, label, color in [
+        (15, "calm", "rgba(39, 174, 96, 0.08)"),
+        (20, "normal", "rgba(241, 196, 15, 0.08)"),
+        (30, "stress", "rgba(192, 57, 43, 0.08)"),
+    ]:
+        fig.add_hline(y=level, line_color="rgba(0,0,0,0.15)", line_dash="dot", line_width=0.5)
+
+    fig.update_layout(
+        title=f"VIX 30d — current {view.vix.current:.2f}",
+        height=200, margin=dict(t=40, b=20, l=40, r=20),
+        showlegend=False,
+        yaxis_title=None,
+    )
+    return fig
 
 
 # ─────────────────────────── options wall ───────────────────────────

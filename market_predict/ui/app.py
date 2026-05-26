@@ -54,14 +54,53 @@ with st.spinner(f"Fetching {symbol} data..."):
         st.error(f"Failed to fetch data: {e}")
         st.stop()
 
-# Header metrics
-m1, m2, m3, m4 = st.columns(4)
-m1.metric(view.symbol, f"${view.spot:.2f}")
-m2.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
+# Header metrics — two rows
+# Row 1: ticker / underlying / futures / VIX
+r1_a, r1_b, r1_c, r1_d = st.columns(4)
+r1_a.metric(view.symbol, f"${view.spot:.2f}")
+r1_b.metric(view.underlying_name, f"{view.underlying_value:,.2f}")
+
+if view.futures is not None:
+    r1_c.metric(
+        f"{view.futures.name} futures",
+        f"{view.futures.last:,.2f}",
+        f"{view.futures.change_pct:+.2f}% overnight",
+    )
+else:
+    r1_c.metric(f"futures", "n/a")
+
+if view.vix is not None:
+    vix_delta = view.vix.current - view.vix.mean_30d
+    r1_d.metric(
+        "VIX",
+        f"{view.vix.current:.2f}",
+        f"{vix_delta:+.2f} vs 30d avg",
+        delta_color="inverse",  # higher VIX = bad
+    )
+else:
+    r1_d.metric("VIX", "n/a")
+
+# Row 2: options-derived (ATM IV, P/C ratio) — only if we have options
 if view.options_wall:
-    m3.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
+    r2_a, r2_b, _, _ = st.columns(4)
+    r2_a.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
     pc = view.options_wall.total_put_oi / max(view.options_wall.total_call_oi, 1)
-    m4.metric("Put/Call OI", f"{pc:.2f}")
+    r2_b.metric("Put/Call OI", f"{pc:.2f}")
+
+st.divider()
+
+# Price history + VIX mini side-by-side
+ph_l, ph_r = st.columns([2.5, 1])
+with ph_l:
+    st.plotly_chart(charts.price_history(view), use_container_width=True)
+with ph_r:
+    st.plotly_chart(charts.vix_mini(view), use_container_width=True)
+    if view.futures is not None:
+        st.caption(
+            f"📌 **{view.futures.name} {view.futures.last:,.2f}** "
+            f"({view.futures.change_pct:+.2f}% vs prev close ${view.futures.previous_close:,.2f}). "
+            f"Overnight futures lead the cash open."
+        )
 
 st.divider()
 
