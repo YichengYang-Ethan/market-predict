@@ -2,21 +2,17 @@
 
 Three charts, one per top-level concept:
     - options_wall: call/put OI bars around spot, with vlines for key levels
-    - kalshi_distribution: probability histogram across yearly brackets
+    - kalshi_distribution: probability histogram across brackets (daily or yearly)
     - fed_path: horizontal stacked bars for the next FOMC meetings
 
 Each function takes the TickerView dataclass and returns a plotly Figure.
 """
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 import pandas as pd
 import plotly.graph_objects as go
 
-from market_predict.models import TickerView
-
-if TYPE_CHECKING:
-    pass
+from market_predict.models import KalshiBracket, TickerView
 
 
 # ─────────────────────────── options wall ───────────────────────────
@@ -77,23 +73,28 @@ def options_wall(view: TickerView) -> go.Figure:
 # ─────────────────────── Kalshi distribution ────────────────────────
 
 
-def kalshi_distribution(view: TickerView) -> go.Figure:
+def kalshi_distribution(
+    brackets: list[KalshiBracket],
+    ref_value: float,
+    ref_name: str,
+    title: str,
+) -> go.Figure:
     fig = go.Figure()
-    if not view.kalshi_yearly:
-        fig.update_layout(title="No Kalshi brackets available")
+    if not brackets:
+        fig.update_layout(title=f"{title} — no active brackets")
         return fig
 
     between = sorted(
-        [b for b in view.kalshi_yearly if b.kind == "between"],
+        [b for b in brackets if b.kind == "between"],
         key=lambda b: (b.strike_low + b.strike_high) / 2,
     )
     below_rails = sorted(
-        [b for b in view.kalshi_yearly if b.kind == "below"],
+        [b for b in brackets if b.kind == "below"],
         key=lambda b: b.strike_high or 0,
         reverse=True,
     )
     above_rails = sorted(
-        [b for b in view.kalshi_yearly if b.kind == "above"],
+        [b for b in brackets if b.kind == "above"],
         key=lambda b: b.strike_low or 0,
     )
 
@@ -133,15 +134,14 @@ def kalshi_distribution(view: TickerView) -> go.Figure:
         )
 
     fig.add_vline(
-        x=view.underlying_value, line_color="#2c3e50", line_dash="solid", line_width=2,
-        annotation_text=f"<b>{view.underlying_name} {view.underlying_value:,.0f}</b>",
+        x=ref_value, line_color="#2c3e50", line_dash="solid", line_width=2,
+        annotation_text=f"<b>{ref_name} {ref_value:,.0f}</b>",
         annotation_position="top",
     )
 
-    close_time = view.kalshi_yearly[0].close_time
     fig.update_layout(
-        title=f"Kalshi {view.underlying_name} distribution — resolves {close_time}",
-        xaxis_title=view.underlying_name,
+        title=title,
+        xaxis_title=ref_name,
         yaxis_title="Probability (%)",
         height=400,
         showlegend=False,

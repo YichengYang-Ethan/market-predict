@@ -34,8 +34,11 @@ def build_view(symbol: str) -> TickerView:
     print(f"Fetching underlying {cfg['underlying_symbol']} ...", file=sys.stderr)
     underlying_value = float(yf.Ticker(cfg["underlying_symbol"]).fast_info.last_price)
 
-    print(f"Fetching Kalshi {cfg['kalshi_yearly']} ...", file=sys.stderr)
-    brackets = fetch_brackets(cfg["kalshi_yearly"])
+    print(f"Fetching Kalshi {cfg['kalshi_yearly']} (yearly) ...", file=sys.stderr)
+    yearly = fetch_brackets(cfg["kalshi_yearly"])
+
+    print(f"Fetching Kalshi {cfg['kalshi_daily']} (daily) ...", file=sys.stderr)
+    daily = fetch_brackets(cfg["kalshi_daily"])
 
     print(f"Fetching Fed path ...", file=sys.stderr)
     meetings = fetch_fed_meetings()
@@ -47,7 +50,8 @@ def build_view(symbol: str) -> TickerView:
         underlying_value=underlying_value,
         timestamp=datetime.now(),
         options_wall=wall,
-        kalshi_yearly=brackets,
+        kalshi_yearly=yearly,
+        kalshi_daily=daily,
         fed_meetings=meetings,
         calls_chain=calls,
         puts_chain=puts,

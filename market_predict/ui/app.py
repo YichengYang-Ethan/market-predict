@@ -85,7 +85,49 @@ else:
 col_l, col_r = st.columns([1, 1])
 with col_l:
     st.subheader("Kalshi distribution")
-    st.plotly_chart(charts.kalshi_distribution(view), use_container_width=True)
+    tab_daily, tab_monthly, tab_yearly = st.tabs(["Daily", "Monthly", "Yearly"])
+
+    with tab_daily:
+        if view.kalshi_daily:
+            close_time = view.kalshi_daily[0].close_time
+            st.plotly_chart(
+                charts.kalshi_distribution(
+                    view.kalshi_daily,
+                    view.underlying_value,
+                    view.underlying_name,
+                    f"Kalshi {view.underlying_name} — resolves {close_time}",
+                ),
+                use_container_width=True,
+            )
+            st.caption(
+                "⚠️ Daily contracts have low OI (~$0.3k–3k vs yearly $1.8M–2.6M). "
+                "Treat as directional signal only."
+            )
+        else:
+            st.info("No active daily Kalshi brackets for this underlying right now.")
+
+    with tab_monthly:
+        st.info(
+            "**Kalshi does not currently list monthly range contracts** for S&P 500 or Nasdaq 100. "
+            "Series `KXINXM` / `KXNASDAQ100M` exist in their catalog but show 0 active markets. "
+            "If they relist, this tab will populate automatically."
+        )
+
+    with tab_yearly:
+        if view.kalshi_yearly:
+            close_time = view.kalshi_yearly[0].close_time
+            st.plotly_chart(
+                charts.kalshi_distribution(
+                    view.kalshi_yearly,
+                    view.underlying_value,
+                    view.underlying_name,
+                    f"Kalshi {view.underlying_name} — resolves {close_time}",
+                ),
+                use_container_width=True,
+            )
+        else:
+            st.info("No active yearly Kalshi brackets.")
+
 with col_r:
     st.subheader("Fed path")
     st.plotly_chart(charts.fed_path(view), use_container_width=True)
