@@ -8,7 +8,7 @@ import yfinance as yf
 from market_predict.models import TickerView
 from market_predict.render import render
 from market_predict.sources.kalshi import fetch_brackets, fetch_fed_meetings
-from market_predict.sources.polymarket import fetch_monthly_one_touch
+from market_predict.sources.polymarket import fetch_daily_up_down, fetch_monthly_one_touch
 from market_predict.sources.yfin import (
     get_options_chain,
     get_spot,
@@ -45,8 +45,15 @@ def build_view(symbol: str) -> TickerView:
     try:
         poly_monthly = fetch_monthly_one_touch(cfg["underlying_name"])
     except Exception as exc:
-        print(f"  (Polymarket fetch failed: {exc})", file=sys.stderr)
+        print(f"  (Polymarket monthly fetch failed: {exc})", file=sys.stderr)
         poly_monthly = None
+
+    print(f"Fetching Polymarket daily up/down ...", file=sys.stderr)
+    try:
+        poly_daily = fetch_daily_up_down(cfg["underlying_name"])
+    except Exception as exc:
+        print(f"  (Polymarket daily fetch failed: {exc})", file=sys.stderr)
+        poly_daily = None
 
     print(f"Fetching Fed path ...", file=sys.stderr)
     meetings = fetch_fed_meetings()
@@ -61,6 +68,7 @@ def build_view(symbol: str) -> TickerView:
         kalshi_yearly=yearly,
         kalshi_daily=daily,
         polymarket_monthly=poly_monthly,
+        polymarket_daily_updown=poly_daily,
         fed_meetings=meetings,
         calls_chain=calls,
         puts_chain=puts,

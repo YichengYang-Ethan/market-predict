@@ -63,6 +63,7 @@ class TickerView:
     # Polymarket monthly one-touch (HIGH/LOW); typed Any to keep models.py
     # free of source-specific imports. May be None if no contract available.
     polymarket_monthly: Optional[Any] = None
+    polymarket_daily_updown: Optional[Any] = None
     # Optional raw chain (typed Any to avoid hard pandas import in models)
     # Used by the Streamlit UI to draw per-strike OI bars; CLI does not consume.
     calls_chain: Optional[Any] = None

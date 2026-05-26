@@ -88,6 +88,32 @@ with col_l:
     tab_daily, tab_monthly, tab_yearly = st.tabs(["Daily", "Monthly", "Yearly"])
 
     with tab_daily:
+        # Polymarket binary up/down at top — single most-watched daily signal
+        if view.polymarket_daily_updown is not None:
+            pd_ud = view.polymarket_daily_updown
+            up_col, down_col, vol_col = st.columns([1, 1, 1])
+            # Direction-tinted: green if up>down, red otherwise (delta carries arrow)
+            up_delta = f"{(pd_ud.p_up - 0.5) * 100:+.1f} pp vs coin-flip"
+            down_delta = f"{(pd_ud.p_down - 0.5) * 100:+.1f} pp vs coin-flip"
+            up_col.metric(
+                f"Poly P({view.underlying_name} UP {pd_ud.end_date})",
+                f"{pd_ud.p_up * 100:.1f}%",
+                up_delta,
+            )
+            down_col.metric(
+                f"Poly P({view.underlying_name} DOWN {pd_ud.end_date})",
+                f"{pd_ud.p_down * 100:.1f}%",
+                down_delta,
+                delta_color="inverse",
+            )
+            vol_col.metric("Poly vol24", f"${pd_ud.volume_24h:,.0f}")
+            st.caption(
+                f"📌 *{pd_ud.title}* — single binary, resolves on close. "
+                f"Source: Polymarket."
+            )
+            st.divider()
+
+        # Kalshi distribution below
         if view.kalshi_daily:
             close_time = view.kalshi_daily[0].close_time
             st.plotly_chart(
@@ -100,11 +126,11 @@ with col_l:
                 use_container_width=True,
             )
             st.caption(
-                "⚠️ Daily contracts have low OI (~$0.3k–3k vs yearly $1.8M–2.6M). "
+                "⚠️ Daily Kalshi brackets have low OI (~$0.3k–3k vs yearly $1.8M–2.6M). "
                 "Treat as directional signal only."
             )
-        else:
-            st.info("No active daily Kalshi brackets for this underlying right now.")
+        elif view.polymarket_daily_updown is None:
+            st.info("No active daily contracts (Kalshi or Polymarket) for this underlying.")
 
     with tab_monthly:
         if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:

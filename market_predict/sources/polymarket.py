@@ -42,6 +42,17 @@ class PolyEvent:
     brackets: list[PolyOneTouchBracket]
 
 
+@dataclass
+class PolyDailyBinary:
+    """Single 'Up or Down today' bet — P(close > open today)."""
+
+    title: str
+    end_date: str
+    p_up: float
+    p_down: float
+    volume_24h: float
+
+
 # Underlying-name → list of keywords to match in event titles.
 # Polymarket uses "SPY" / "SPX" / "S&P 500" interchangeably; we match any.
 UNDERLYING_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -86,6 +97,18 @@ def fetch_finance_events(limit: int = 200) -> list[dict]:
     r = requests.get(
         f"{BASE}/events",
         params={"tag_slug": "finance", "active": "true", "closed": "false", "limit": limit},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data if isinstance(data, list) else data.get("data", [])
+
+
+def fetch_daily_close_events(limit: int = 200) -> list[dict]:
+    """Polymarket's daily up/down + 'closes above X' events all share tag_slug=daily-close."""
+    r = requests.get(
+        f"{BASE}/events",
+        params={"tag_slug": "daily-close", "active": "true", "closed": "false", "limit": limit},
         timeout=15,
     )
     r.raise_for_status()
@@ -157,4 +180,60 @@ def fetch_monthly_one_touch(underlying_name: str) -> Optional[PolyEvent]:
         end_date=e.get("endDate", "")[:10],
         volume_24h=_safe_float(e.get("volume24hr", 0)),
         brackets=brackets,
+    )
+
+
+def fetch_daily_up_down(underlying_name: str) -> Optional[PolyDailyBinary]:
+    """Find the most recent (closest-to-today) Polymarket daily up/down event.
+
+    Polymarket creates one event per ticker per trading day with title format:
+        "<NAME> (TICKER) Up or Down on <Month> <Day>?"
+    Each event has exactly one binary market with outcomes ["Up", "Down"].
+    """
+    keywords = UNDERLYING_KEYWORDS.get(underlying_name, ())
+    if not keywords:
+        return None
+
+    today = __import__("datetime").date.today().isoformat()
+    events = fetch_daily_close_events()
+    candidates = []
+    for e in events:
+        title = e.get("title", "")
+        if "up or down" not in title.lower():
+            continue
+        if not any(k.lower() in title.lower() for k in keywords):
+            continue
+        end = e.get("endDate", "")[:10]
+        if end < today:
+            continue  # skip already-resolved
+        candidates.append(e)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda e: e.get("endDate", ""))
+    e = candidates[0]
+    markets = e.get("markets") or []
+    if not markets:
+        return None
+    m = markets[0]
+
+    import json
+    prices_raw = m.get("outcomePrices", "[]")
+    try:
+        prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
+    except (ValueError, TypeError):
+        prices = []
+    if len(prices) < 2:
+        return None
+
+    p_up = _safe_float(prices[0])
+    p_down = _safe_float(prices[1])
+
+    return PolyDailyBinary(
+        title=e.get("title", ""),
+        end_date=e.get("endDate", "")[:10],
+        p_up=p_up,
+        p_down=p_down,
+        volume_24h=_safe_float(e.get("volume24hr", 0)),
     )
