@@ -2,7 +2,7 @@
 
 Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data feeds — spot, options walls, Kalshi prediction-market distributions, Polymarket binary bets, Fed path — into one Streamlit page with zero auth keys, zero servers, and zero ongoing cost.
 
-[**Live demo →**](https://market-predict.streamlit.app) (Streamlit Community Cloud, redeploys on every push)
+> **Deploy your own free copy** in 5 minutes via [share.streamlit.io](https://share.streamlit.io): pick this repo, branch `main`, file `streamlit_app.py`. The URL you choose (e.g. `your-name.streamlit.app`) is shareable — anyone with the link can view, no login.
 
 ---
 
