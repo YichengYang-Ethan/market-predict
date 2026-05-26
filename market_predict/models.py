@@ -1,7 +1,7 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -58,3 +58,8 @@ class TickerView:
     options_wall: Optional[OptionsWall]
     kalshi_yearly: list[KalshiBracket]
     fed_meetings: list[FedMeeting]
+    # Optional raw chain (typed Any to avoid hard pandas import in models)
+    # Used by the Streamlit UI to draw per-strike OI bars; CLI does not consume.
+    calls_chain: Optional[Any] = None
+    puts_chain: Optional[Any] = None
+    options_expiry: Optional[str] = None

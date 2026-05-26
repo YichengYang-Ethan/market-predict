@@ -11,6 +11,8 @@ Everything runs on free public APIs — no auth keys, no paid subscriptions, zer
 
 ## Quick start
 
+### CLI (text view)
+
 ```bash
 git clone https://github.com/YichengYang-Ethan/market-predict
 cd market-predict
@@ -18,6 +20,29 @@ pip install -e .
 python -m market_predict SPY
 python -m market_predict QQQ
 ```
+
+### Streamlit dashboard (visual view)
+
+```bash
+pip install -e .[ui]                # or: pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Then open `http://localhost:8501`. Includes:
+
+- **Options walls** — call/put OI bars around spot with vlines for call wall, put wall, max pain, gamma flip
+- **Kalshi distribution** — probability histogram across yearly brackets, with "below X / above Y" rails called out
+- **Fed path** — horizontal stacked bars for the next 3 FOMC meetings (hold / cut / hike)
+- **Reading notes** — auto-generated commentary highlighting unusual patterns (P/C extremes, call walls below spot, etc.)
+
+5-minute data cache keeps API calls light. Hit **🔄 Refresh** to bust.
+
+### Deploy to Streamlit Community Cloud (free)
+
+1. Push this repo to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io) → "New app" → connect your GitHub
+3. Pick the `market-predict` repo, branch `main`, file `streamlit_app.py`
+4. Click Deploy. Auto-redeploys on every `git push`.
 
 ## Sample output
 

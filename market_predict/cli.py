@@ -26,6 +26,7 @@ def build_view(symbol: str) -> TickerView:
     expirations = list_expirations(symbol)
     expiry = pick_near_monthly_expiry(expirations)
     wall = None
+    calls = puts = None
     if expiry:
         calls, puts = get_options_chain(symbol, expiry)
         wall = compute_wall(spot, expiry, calls, puts)
@@ -48,6 +49,9 @@ def build_view(symbol: str) -> TickerView:
         options_wall=wall,
         kalshi_yearly=brackets,
         fed_meetings=meetings,
+        calls_chain=calls,
+        puts_chain=puts,
+        options_expiry=expiry,
     )
 
 
