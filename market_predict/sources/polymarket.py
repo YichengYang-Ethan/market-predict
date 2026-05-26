@@ -408,10 +408,15 @@ def fetch_daily_close_brackets(underlying_name: str) -> Optional[PolyCloseBracke
 def _fetch_event_by_title_substring(
     tag_slugs: tuple[str, ...], title_substring: str
 ) -> Optional[dict]:
-    """Find soonest-resolving event whose title contains substring across given tags."""
+    """Find soonest-resolving event whose title contains substring across given tags.
+
+    Tags are fetched in parallel — Polymarket lists `fed-rates` / `fed` /
+    `jerome-powell` separately, and a 3x serial GET adds ~10s on a slow link.
+    """
+    from concurrent.futures import ThreadPoolExecutor
     today = __import__("datetime").date.today().isoformat()
-    all_events: dict[str, dict] = {}
-    for tag in tag_slugs:
+
+    def fetch_tag(tag: str) -> list[dict]:
         try:
             r = requests.get(
                 f"{BASE}/events",
@@ -419,11 +424,15 @@ def _fetch_event_by_title_substring(
                 timeout=15,
             )
             data = r.json()
-            evs = data if isinstance(data, list) else data.get("data", [])
+            return data if isinstance(data, list) else data.get("data", [])
+        except Exception:
+            return []
+
+    all_events: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=len(tag_slugs)) as ex:
+        for evs in ex.map(fetch_tag, tag_slugs):
             for e in evs:
                 all_events[e.get("id")] = e
-        except Exception:
-            continue
     candidates = [
         e for e in all_events.values()
         if title_substring.lower() in e.get("title", "").lower()

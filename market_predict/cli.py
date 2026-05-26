@@ -1,6 +1,12 @@
-"""CLI entry point: python -m market_predict SPY"""
+"""CLI entry point: python -m market_predict SPY
+
+Fetches 18 independent data sources in parallel via a ThreadPoolExecutor.
+Serial fetch is ~100s on cold cache (each yfinance call is 5-15s);
+parallel fetch lands around 8-15s, bottlenecked by the slowest single API.
+"""
 from __future__ import annotations
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import yfinance as yf
@@ -36,122 +42,82 @@ from market_predict.tickers import TICKER_MAP, get_config
 from market_predict.transforms.walls import compute_wall
 
 
+def _safe(fn, *args, default=None, label=""):
+    """Run fn(*args); on any exception, log and return default."""
+    try:
+        return fn(*args)
+    except Exception as exc:
+        print(f"  ({label} failed: {exc})", file=sys.stderr)
+        return default
+
+
+def _get_underlying_value(symbol: str) -> float:
+    return float(yf.Ticker(symbol).fast_info.last_price)
+
+
 def build_view(symbol: str) -> TickerView:
     cfg = get_config(symbol)
 
-    print(f"Fetching {symbol} spot + chain ...", file=sys.stderr)
-    spot = 0.0
-    expiry = None
+    print(f"Fetching 18 sources for {symbol} in parallel ...", file=sys.stderr)
+    with ThreadPoolExecutor(max_workers=18) as pool:
+        # yfinance batch
+        f_spot = pool.submit(_safe, get_spot, symbol, default=0.0, label="spot")
+        f_expirations = pool.submit(_safe, list_expirations, symbol, default=(), label="expirations")
+        f_underlying = pool.submit(_safe, _get_underlying_value, cfg["underlying_symbol"], default=0.0, label="underlying")
+        f_history = pool.submit(_safe, get_history, symbol, "3mo", default=None, label="history")
+        f_vix = pool.submit(get_vix)  # already returns None on failure
+        f_futures = pool.submit(get_futures, cfg["futures_symbol"], cfg["futures_name"])
+
+        # Kalshi batch
+        f_yearly = pool.submit(_safe, fetch_brackets, cfg["kalshi_yearly"], default=[], label="kalshi yearly")
+        f_daily = pool.submit(_safe, fetch_brackets, cfg["kalshi_daily"], default=[], label="kalshi daily")
+        f_year_max = pool.submit(_safe, fetch_one_touch_cumulative, cfg["kalshi_year_max"], default=[], label="year max")
+        f_year_min = pool.submit(_safe, fetch_one_touch_cumulative, cfg["kalshi_year_min"], default=[], label="year min")
+        f_meetings = pool.submit(_safe, fetch_fed_meetings, default=[], label="fed meetings")
+        f_rate_count = pool.submit(_safe, fetch_event_outcomes, "KXRATECUTCOUNT", default=None, label="rate cut count")
+        f_recession = pool.submit(_safe, fetch_binary_events, "KXRECSSNBER", default=[], label="recession")
+
+        # Polymarket batch
+        f_poly_monthly = pool.submit(_safe, fetch_monthly_one_touch, cfg["underlying_name"], default=None, label="poly monthly")
+        f_poly_daily = pool.submit(_safe, fetch_daily_up_down, cfg["underlying_name"], default=None, label="poly daily")
+        f_poly_premarket = pool.submit(_safe, fetch_premarket_updown, cfg["underlying_name"], default=None, label="poly premarket")
+        f_poly_close = pool.submit(_safe, fetch_daily_close_brackets, cfg["underlying_name"], default=None, label="poly close")
+        f_poly_fed = pool.submit(_safe, fetch_fed_decision_event, default=None, label="poly fed")
+        f_poly_cuts = pool.submit(_safe, fetch_rate_cuts_count_2026, default=None, label="poly cuts")
+        f_poly_largest = pool.submit(_safe, fetch_largest_company_event, default=None, label="poly largest")
+
+        # Resolve
+        spot = f_spot.result()
+        expirations = f_expirations.result()
+        underlying_value = f_underlying.result()
+        history = f_history.result()
+        vix = f_vix.result()
+        futures = f_futures.result()
+        yearly = f_yearly.result()
+        daily = f_daily.result()
+        year_max = f_year_max.result()
+        year_min = f_year_min.result()
+        meetings = f_meetings.result()
+        rate_cut_count = f_rate_count.result()
+        recession = f_recession.result()
+        poly_monthly = f_poly_monthly.result()
+        poly_daily = f_poly_daily.result()
+        poly_premarket = f_poly_premarket.result()
+        poly_close_brackets = f_poly_close.result()
+        poly_fed = f_poly_fed.result()
+        poly_cuts = f_poly_cuts.result()
+        poly_largest = f_poly_largest.result()
+
+    # Options chain depends on spot + expirations → fetch sequentially after
+    expiry = pick_near_monthly_expiry(expirations) if expirations else None
     wall = None
     calls = puts = None
-    try:
-        spot = get_spot(symbol)
-    except Exception as exc:
-        print(f"  (spot fetch failed: {exc})", file=sys.stderr)
-    try:
-        expirations = list_expirations(symbol)
-        expiry = pick_near_monthly_expiry(expirations)
-    except Exception as exc:
-        print(f"  (expirations fetch failed: {exc})", file=sys.stderr)
     if expiry and spot:
         try:
             calls, puts = get_options_chain(symbol, expiry)
             wall = compute_wall(spot, expiry, calls, puts)
         except Exception as exc:
             print(f"  (options chain failed: {exc})", file=sys.stderr)
-
-    print(f"Fetching underlying {cfg['underlying_symbol']} ...", file=sys.stderr)
-    underlying_value = 0.0
-    try:
-        underlying_value = float(yf.Ticker(cfg["underlying_symbol"]).fast_info.last_price)
-    except Exception as exc:
-        print(f"  (underlying fetch failed: {exc})", file=sys.stderr)
-
-    print(f"Fetching {symbol} 3mo history ...", file=sys.stderr)
-    history = None
-    try:
-        history = get_history(symbol, period="3mo")
-    except Exception as exc:
-        print(f"  (history fetch failed: {exc})", file=sys.stderr)
-
-    print(f"Fetching VIX ...", file=sys.stderr)
-    vix = get_vix()
-
-    print(f"Fetching futures {cfg['futures_symbol']} ...", file=sys.stderr)
-    futures = get_futures(cfg["futures_symbol"], cfg["futures_name"])
-
-    print(f"Fetching Kalshi {cfg['kalshi_yearly']} (yearly) ...", file=sys.stderr)
-    try:
-        yearly = fetch_brackets(cfg["kalshi_yearly"])
-    except Exception as exc:
-        print(f"  (kalshi yearly failed: {exc})", file=sys.stderr); yearly = []
-
-    print(f"Fetching Kalshi {cfg['kalshi_daily']} (daily) ...", file=sys.stderr)
-    try:
-        daily = fetch_brackets(cfg["kalshi_daily"])
-    except Exception as exc:
-        print(f"  (kalshi daily failed: {exc})", file=sys.stderr); daily = []
-
-    print(f"Fetching Polymarket monthly one-touch ...", file=sys.stderr)
-    try:
-        poly_monthly = fetch_monthly_one_touch(cfg["underlying_name"])
-    except Exception as exc:
-        print(f"  (Polymarket monthly fetch failed: {exc})", file=sys.stderr)
-        poly_monthly = None
-
-    print(f"Fetching Polymarket daily up/down ...", file=sys.stderr)
-    try:
-        poly_daily = fetch_daily_up_down(cfg["underlying_name"])
-    except Exception as exc:
-        print(f"  (Polymarket daily fetch failed: {exc})", file=sys.stderr)
-        poly_daily = None
-
-    print(f"Fetching Fed path ...", file=sys.stderr)
-    try:
-        meetings = fetch_fed_meetings()
-    except Exception as exc:
-        print(f"  (fed path failed: {exc})", file=sys.stderr); meetings = []
-
-    # ─── v2 additions ───
-    print(f"Fetching Kalshi rate-cut count + recession + year MAX/MIN ...", file=sys.stderr)
-    try:
-        rate_cut_count = fetch_event_outcomes("KXRATECUTCOUNT")
-    except Exception as e:
-        print(f"  (rate cut count: {e})", file=sys.stderr); rate_cut_count = None
-    try:
-        recession = fetch_binary_events("KXRECSSNBER")
-    except Exception as e:
-        print(f"  (recession: {e})", file=sys.stderr); recession = []
-    try:
-        year_max = fetch_one_touch_cumulative(cfg["kalshi_year_max"])
-    except Exception as e:
-        print(f"  (year max: {e})", file=sys.stderr); year_max = []
-    try:
-        year_min = fetch_one_touch_cumulative(cfg["kalshi_year_min"])
-    except Exception as e:
-        print(f"  (year min: {e})", file=sys.stderr); year_min = []
-
-    print(f"Fetching Polymarket premarket + close brackets + Fed/rate cuts + ranking ...", file=sys.stderr)
-    try:
-        poly_premarket = fetch_premarket_updown(cfg["underlying_name"])
-    except Exception as e:
-        print(f"  (premarket: {e})", file=sys.stderr); poly_premarket = None
-    try:
-        poly_close_brackets = fetch_daily_close_brackets(cfg["underlying_name"])
-    except Exception as e:
-        print(f"  (close brackets: {e})", file=sys.stderr); poly_close_brackets = None
-    try:
-        poly_fed = fetch_fed_decision_event()
-    except Exception as e:
-        print(f"  (poly fed: {e})", file=sys.stderr); poly_fed = None
-    try:
-        poly_cuts = fetch_rate_cuts_count_2026()
-    except Exception as e:
-        print(f"  (poly cuts: {e})", file=sys.stderr); poly_cuts = None
-    try:
-        poly_largest = fetch_largest_company_event()
-    except Exception as e:
-        print(f"  (largest: {e})", file=sys.stderr); poly_largest = None
 
     return TickerView(
         symbol=symbol.upper(),

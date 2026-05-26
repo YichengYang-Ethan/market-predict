@@ -18,7 +18,10 @@ from market_predict.ui import charts
 st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+# 15-min cache — Streamlit Cloud's shared instance means once one visitor
+# warms it, the next several get the page instantly. Prediction-market
+# probabilities don't move enough in 15 min to matter for context.
+@st.cache_data(ttl=900, show_spinner=False)
 def load_view(symbol: str):
     return build_view(symbol)
 
@@ -400,5 +403,5 @@ st.markdown("---")
 st.caption(
     f"Last fetch · {view.timestamp:%Y-%m-%d %H:%M}  ·  "
     f"sources · yfinance + Kalshi + Polymarket  ·  "
-    f"cache TTL · 5 min"
+    f"cache TTL · 15 min"
 )
