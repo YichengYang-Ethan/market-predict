@@ -138,13 +138,13 @@ def vix_mini(view: TickerView) -> go.Figure:
     ))
     fig.add_hline(
         y=view.vix.mean_30d, line_color="rgba(0,0,0,0.35)", line_dash="dash", line_width=1,
-        annotation_text=f"30d avg {view.vix.mean_30d:.1f}",
+        annotation_text=f"1m avg {view.vix.mean_30d:.1f}",
         annotation_position="right", annotation_font_size=10,
     )
     for level in (15, 20, 30):
         fig.add_hline(y=level, line_color="rgba(0,0,0,0.10)", line_dash="dot", line_width=0.5)
 
-    _apply_theme(fig, title=f"VIX 30d · current {view.vix.current:.2f}", height=200)
+    _apply_theme(fig, title=f"VIX 1m · current {view.vix.current:.2f}", height=200)
     fig.update_layout(showlegend=False, yaxis_title=None, margin=dict(t=40, b=20, l=40, r=20))
     return fig
 
@@ -240,7 +240,7 @@ def kalshi_distribution(
         xs = [(b.strike_low + b.strike_high) / 2 for b in between]
         ys = [b.yes_mid * 100 for b in between]
         labels = [
-            f"{b.strike_low:,.0f}–{b.strike_high:,.0f}<br>OI ${b.open_interest:,.0f}<br>vol24 ${b.volume_24h:,.0f}"
+            f"{b.strike_low:,.0f}–{b.strike_high:,.0f}<br>OI {b.open_interest:,.0f} ctrs<br>vol24 ${b.volume_24h:,.0f}"
             for b in between
         ]
         bar_width = (between[0].strike_high - between[0].strike_low) * 0.85 if len(between) else None
@@ -351,29 +351,44 @@ def daily_brackets_dual(
 ) -> go.Figure:
     """Two-source daily close brackets on a unified SPY-price X-axis.
 
-    Kalshi KXINX brackets (SPX scale) are divided by the ratio to fit SPY scale.
-    Polymarket cumulative 'closes above' is differenced into bracket probabilities.
-    Two color-coded bar series share the X-axis so divergence is visible directly.
+    Kalshi KXINX brackets (SPX scale) are divided by the live ratio to fit SPY.
+    Polymarket cumulative 'closes above' is monotonized then differenced.
+    Kalshi brackets are filtered to the soonest-resolving event (KXINX returns
+    multiple expiries per call).
     """
     fig = go.Figure()
     if not kalshi_brackets and not poly_close_brackets:
         fig.update_layout(title="Daily close brackets — no data")
         return fig
 
-    # Kalshi → SPY scale (divide strikes by ratio)
+    # Live SPX/SPY ratio is more accurate than the hardcoded 10.0
+    if underlying_value and spot:
+        ratio = underlying_value / spot
+    else:
+        ratio = spx_to_spy_ratio
+
+    # Filter Kalshi brackets to the soonest event (KXINX often returns 2+ expiries)
+    kalshi_filtered = kalshi_brackets or []
+    if kalshi_filtered:
+        next_close = min(b.close_time for b in kalshi_filtered if b.close_time)
+        kalshi_filtered = [b for b in kalshi_filtered if b.close_time == next_close]
+
+    # Kalshi → SPY scale (divide strikes by live ratio)
     kalshi_between = [
-        b for b in (kalshi_brackets or [])
+        b for b in kalshi_filtered
         if b.kind == "between" and b.strike_low and b.strike_high and b.yes_mid > 0
     ]
     if kalshi_between:
-        xs = [((b.strike_low + b.strike_high) / 2) / spx_to_spy_ratio for b in kalshi_between]
+        xs = [((b.strike_low + b.strike_high) / 2) / ratio for b in kalshi_between]
         ys = [b.yes_mid * 100 for b in kalshi_between]
         labels = [
-            f"Kalshi: {b.strike_low:,.0f}-{b.strike_high:,.0f} (SPX)<br>= ${b.strike_low/spx_to_spy_ratio:.1f}-${b.strike_high/spx_to_spy_ratio:.1f} (SPY)<br>P = {b.yes_mid*100:.1f}%<br>OI ${b.open_interest:,.0f}"
+            f"Kalshi: {b.strike_low:,.0f}–{b.strike_high:,.0f} (SPX)"
+            f"<br>= ${b.strike_low/ratio:.1f}–${b.strike_high/ratio:.1f} (SPY)"
+            f"<br>P = {b.yes_mid*100:.1f}%"
+            f"<br>OI {b.open_interest:,.0f} ctrs"
             for b in kalshi_between
         ]
-        # SPY-equivalent bar width
-        width = (kalshi_between[0].strike_high - kalshi_between[0].strike_low) / spx_to_spy_ratio * 0.85
+        width = (kalshi_between[0].strike_high - kalshi_between[0].strike_low) / ratio * 0.85
         fig.add_trace(go.Bar(
             x=xs, y=ys, width=width,
             customdata=labels,
@@ -382,33 +397,37 @@ def daily_brackets_dual(
             name="Kalshi brackets",
         ))
 
-    # Polymarket cumulative → differenced brackets
+    # Polymarket cumulative → monotonize → differenced brackets
     if poly_close_brackets and poly_close_brackets.brackets:
         sb = sorted(poly_close_brackets.brackets, key=lambda b: b.strike)
+        # Enforce monotonic-decreasing P from low→high strike. Pass right-to-left:
+        # at each strike, P cannot exceed P at any higher strike (cumulative noise fix).
+        mono_prices = [b.yes_price for b in sb]
+        for i in range(len(mono_prices) - 2, -1, -1):
+            if mono_prices[i] < mono_prices[i + 1]:
+                mono_prices[i] = mono_prices[i + 1]
         diff_x, diff_y, diff_lbl = [], [], []
         for i in range(len(sb) - 1):
             lo, hi = sb[i].strike, sb[i + 1].strike
-            prob = sb[i].yes_price - sb[i + 1].yes_price
-            if prob <= 0:
-                # negative diff = pricing noise; clamp to small positive
-                prob = max(prob, 0)
-            if prob == 0:
+            prob = mono_prices[i] - mono_prices[i + 1]
+            if prob <= 0.0005:  # < 0.05 pp = noise
                 continue
             diff_x.append((lo + hi) / 2)
             diff_y.append(prob * 100)
             diff_lbl.append(
-                f"Polymarket: ${lo:.0f}-${hi:.0f}<br>"
-                f"P(close > ${lo:.0f}) - P(close > ${hi:.0f})<br>"
-                f"= {prob * 100:.1f}%"
+                f"Polymarket: ${lo:.0f}–${hi:.0f}"
+                f"<br>P(close in bucket) = {prob * 100:.1f}%"
+                f"<br>(monotonized cumulative diff)"
             )
         width_p = (sb[1].strike - sb[0].strike) * 0.85 if len(sb) > 1 else 5
-        fig.add_trace(go.Bar(
-            x=diff_x, y=diff_y, width=width_p,
-            customdata=diff_lbl,
-            hovertemplate="%{customdata}<extra></extra>",
-            marker_color=COLORS["polymarket_fill"],
-            name="Polymarket close-above (differenced)",
-        ))
+        if diff_x:
+            fig.add_trace(go.Bar(
+                x=diff_x, y=diff_y, width=width_p,
+                customdata=diff_lbl,
+                hovertemplate="%{customdata}<extra></extra>",
+                marker_color=COLORS["polymarket_fill"],
+                name="Polymarket (differenced)",
+            ))
 
     fig.add_vline(
         x=spot, line_color=COLORS["spot"], line_dash="solid", line_width=2,
@@ -419,8 +438,8 @@ def daily_brackets_dual(
     close_date = None
     if poly_close_brackets:
         close_date = poly_close_brackets.end_date
-    elif kalshi_brackets:
-        close_date = kalshi_brackets[0].close_time
+    elif kalshi_filtered:
+        close_date = kalshi_filtered[0].close_time
 
     _apply_theme(fig, title=f"Daily close brackets · resolves {close_date or 'today'}", height=380)
     fig.update_layout(
@@ -460,7 +479,7 @@ def kalshi_event_outcomes_bar(meeting, title: str, color: str | None = None) -> 
         text=[f"{o.yes_mid * 100:.0f}%" for o in outcomes],
         textposition="outside",
         marker_color=color,
-        hovertemplate="%{y}<br>P = %{x:.1f}%<br>OI $%{customdata:,.0f}<extra></extra>",
+        hovertemplate="%{y}<br>P = %{x:.1f}%<br>OI %{customdata:,.0f} ctrs<extra></extra>",
         customdata=[o.open_interest for o in outcomes],
     ))
     _apply_theme(fig, title=f"{title} · resolves {meeting.close_time}", height=300)
@@ -605,7 +624,7 @@ def fed_path(view: TickerView) -> go.Figure:
             text=[f"{p:.0f}%" if p >= 5 else "" for p in sub["prob"]],
             textposition="inside",
             insidetextfont=dict(color="white", size=11),
-            hovertemplate=f"{outcome}<br>%{{x:.1f}}%<br>OI $%{{customdata:,.0f}}<extra></extra>",
+            hovertemplate=f"{outcome}<br>%{{x:.1f}}%<br>OI %{{customdata:,.0f}} ctrs<extra></extra>",
             customdata=sub["oi"],
         ))
 

@@ -102,7 +102,7 @@ else:
     m3.metric("Futures", "n/a")
 if view.vix is not None:
     vix_delta = view.vix.current - view.vix.mean_30d
-    m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f} vs 30d avg", delta_color="inverse")
+    m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f} vs 1m avg", delta_color="inverse")
 else:
     m4.metric("VIX", "n/a")
 if view.options_wall:
@@ -299,7 +299,7 @@ with tab_yearly:
                 if b.strike_low:
                     st.write(
                         f"P(year max ≥ {b.strike_low:,.0f}) = **{b.yes_mid*100:.1f}%**  "
-                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI ${b.open_interest:,.0f}</span>",
+                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI {b.open_interest:,.0f} ctrs</span>",
                         unsafe_allow_html=True,
                     )
         else:
@@ -313,7 +313,7 @@ with tab_yearly:
                 if b.strike_high:
                     st.write(
                         f"P(year min ≤ {b.strike_high:,.0f}) = **{b.yes_mid*100:.1f}%**  "
-                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI ${b.open_interest:,.0f}</span>",
+                        f"<span style='color:#7f8c8d;font-size:0.85em'>OI {b.open_interest:,.0f} ctrs</span>",
                         unsafe_allow_html=True,
                     )
         else:
@@ -330,7 +330,7 @@ with tab_macro:
             for b in view.kalshi_recession:
                 st.caption(
                     f"**{b.event_ticker}** — *{b.title}*  "
-                    f"P = {b.yes_mid * 100:.1f}%  ·  OI ${b.open_interest:,.0f}"
+                    f"P = {b.yes_mid * 100:.1f}%  ·  OI {b.open_interest:,.0f} ctrs"
                 )
     with mc_r:
         st.markdown("### Notes")
@@ -339,7 +339,7 @@ with tab_macro:
             "Lagging indicator, but contract resolves YES if NBER declares recession start in the period.\n"
             "- Historical base rate of recession in any given year ≈ 16–17%.\n"
             "- Reference threshold (blue line) on the gauge = 16.5%.\n"
-            f"- Source: Kalshi `KXRECSSNBER` event, total OI typically ${sum(b.open_interest for b in view.kalshi_recession):,.0f}."
+            f"- Source: Kalshi `KXRECSSNBER` event, total OI ≈ {sum(b.open_interest for b in view.kalshi_recession):,.0f} contracts."
         )
 
 with tab_mag7:

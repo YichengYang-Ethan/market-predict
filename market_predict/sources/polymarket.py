@@ -242,6 +242,10 @@ def fetch_daily_up_down(underlying_name: str) -> Optional[PolyDailyBinary]:
     Polymarket creates one event per ticker per trading day with title format:
         "<NAME> (TICKER) Up or Down on <Month> <Day>?"
     Each event has exactly one binary market with outcomes ["Up", "Down"].
+
+    For S&P 500 we prefer the ETF version (SPY) over the SPX cash-index version
+    because the ETF matches the spot price the dashboard quotes; they price
+    slightly differently (dividend drift, 9:30 open vs settlement).
     """
     keywords = UNDERLYING_KEYWORDS.get(underlying_name, ())
     if not keywords:
@@ -264,7 +268,15 @@ def fetch_daily_up_down(underlying_name: str) -> Optional[PolyDailyBinary]:
     if not candidates:
         return None
 
-    candidates.sort(key=lambda e: e.get("endDate", ""))
+    etf_keywords = {"S&P 500": "spy", "Nasdaq 100": "qqq"}
+    etf_kw = etf_keywords.get(underlying_name, "").lower()
+
+    def sort_key(e):
+        title_lower = e.get("title", "").lower()
+        prefers_etf = 0 if etf_kw and f"({etf_kw})" in title_lower else 1
+        return (e.get("endDate", ""), prefers_etf)
+
+    candidates.sort(key=sort_key)
     e = candidates[0]
     markets = e.get("markets") or []
     if not markets:
@@ -474,9 +486,9 @@ def fetch_largest_company_event() -> Optional[PolyRankingEvent]:
     rows = []
     for m in e.get("markets", []):
         name = m.get("groupItemTitle", "") or m.get("question", "")[:40]
-        # Skip placeholder companies ("Company B", "Company D" — Polymarket's
-        # template slots for low-prob outcomes that nobody bets on)
-        if name.lower().startswith("company "):
+        # Skip placeholder rows: "Company A".."Company T" template slots and
+        # the catch-all "Other" outcome — neither has volume or signal.
+        if name.lower().startswith("company ") or name.strip().lower() == "other":
             continue
         try:
             prices = json.loads(m.get("outcomePrices", "[]"))
