@@ -27,16 +27,19 @@ st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
 #   15 min). Streamlit pulls those files over HTTP from raw.githubusercontent.
 # - Locally, `data/snapshot_<SYM>.json` is used as a dev override.
 # - If both miss, we fall back to a slow live `build_view`.
-SNAPSHOT_URL = (
-    "https://raw.githubusercontent.com/YichengYang-Ethan/market-predict/"
-    "snapshots/data/snapshot_{symbol}.json"
-)
+SNAPSHOT_URLS = [
+    # statically.io is a global CDN proxying GitHub — measured 1-4s where
+    # raw.githubusercontent.com runs 5-30s. Try it first.
+    "https://cdn.statically.io/gh/YichengYang-Ethan/market-predict/snapshots/data/snapshot_{symbol}.json",
+    # raw.githubusercontent.com is the official fallback if statically is down
+    "https://raw.githubusercontent.com/YichengYang-Ethan/market-predict/snapshots/data/snapshot_{symbol}.json",
+]
 SNAPSHOT_DIR_LOCAL = Path(__file__).resolve().parent.parent.parent / "data"
 
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_view(symbol: str):
-    # Local dev override
+    # 1. Local dev override
     local = SNAPSHOT_DIR_LOCAL / f"snapshot_{symbol}.json"
     if local.exists():
         snap = load_snapshot(local)
@@ -44,18 +47,19 @@ def load_view(symbol: str):
             snap._source = "snapshot (local file)"
             return snap
 
-    # Remote snapshot from the dedicated `snapshots` branch
-    try:
-        r = requests.get(SNAPSHOT_URL.format(symbol=symbol), timeout=5)
-        if r.ok:
-            snap = load_snapshot_from_text(r.text)
-            if snap is not None:
-                snap._source = "snapshot (GitHub)"
-                return snap
-    except requests.RequestException:
-        pass
+    # 2. Remote snapshot from one of the CDNs (in order, first hit wins)
+    for url_tpl in SNAPSHOT_URLS:
+        try:
+            r = requests.get(url_tpl.format(symbol=symbol), timeout=8)
+            if r.ok:
+                snap = load_snapshot_from_text(r.text)
+                if snap is not None:
+                    snap._source = "snapshot (CDN)"
+                    return snap
+        except requests.RequestException:
+            continue
 
-    # Last resort: live fetch (~13s)
+    # 3. Last resort: live fetch (~13s on a clean IP, can be 30s+ if throttled)
     view = build_view(symbol)
     view._source = "live fetch"
     return view
@@ -439,7 +443,7 @@ _ts = view.timestamp
 _ts_str = _ts.strftime("%Y-%m-%d %H:%M") if hasattr(_ts, "strftime") else str(_ts)[:16]
 _source = getattr(view, "_source", "live fetch")
 _source_label = {
-    "snapshot (GitHub)": "📦 snapshot (GitHub Actions, refreshed every 15 min)",
+    "snapshot (CDN)": "📦 snapshot via CDN (GitHub Actions, refreshed every 15 min)",
     "snapshot (local file)": "📦 snapshot (local dev file)",
     "live fetch": "🛰️ live fetch (Kalshi + Polymarket + yfinance)",
 }.get(_source, _source)
