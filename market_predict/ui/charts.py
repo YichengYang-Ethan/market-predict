@@ -330,7 +330,15 @@ def polymarket_one_touch(poly_event, ref_value: float, ref_name: str) -> go.Figu
             annotation_position="top", annotation_font_color=COLORS["spot"],
         )
 
-    _apply_theme(fig, title=f"Polymarket one-touch · {poly_event.title}", height=400)
+    _apply_theme(
+        fig,
+        title=(
+            "Polymarket barrier-touch probabilities · "
+            "P(touched by expiry) per strike · "
+            f"{poly_event.title}"
+        ),
+        height=400,
+    )
     fig.update_layout(
         xaxis_title=ref_name,
         yaxis_title="P(touched by expiry) (%)",

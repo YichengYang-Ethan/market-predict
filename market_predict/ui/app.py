@@ -327,6 +327,15 @@ else:
 
 with tab_monthly:
     if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
+        st.warning(
+            "**Read this before reading the chart** — this is **NOT a probability "
+            "distribution**. Each point is a path-dependent barrier bet: "
+            "*P(SPX touches this strike at any point before "
+            f"{view.polymarket_monthly.end_date})*. Probabilities do NOT sum to 100% "
+            "because a single path can hit multiple strikes (e.g. SPX rallies to 7700 "
+            "then drops to 7000 → both the HIGH 7600 and LOW 7100 contracts pay YES).",
+            icon="ℹ️",
+        )
         st.plotly_chart(
             charts.polymarket_one_touch(
                 view.polymarket_monthly,
@@ -336,13 +345,13 @@ with tab_monthly:
             use_container_width=True,
         )
         st.caption(
-            f"**One-touch contracts** · Yes resolves if the underlying touches "
-            f"the strike at any point before {view.polymarket_monthly.end_date}. "
-            f"Not mutually exclusive — each strike is its own bet. "
-            f"**Gap around spot is intentional**: Polymarket only lists OTM strikes "
-            f"(HIGH > spot, LOW < spot) since ATM contracts would already be resolved. "
+            f"**Gap around spot is intentional** — Polymarket only lists OTM strikes "
+            f"(HIGH > spot, LOW < spot). ATM one-touch contracts (\"will SPX touch "
+            f"X when spot is already past X\") would resolve YES trivially, so the "
+            f"exchange doesn't list them. "
             f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
-            f"(Kalshi does not currently list monthly range contracts.)"
+            f"For a real distribution (probabilities sum to 100%), see the **Yearly** "
+            f"tab — Kalshi does not currently list a monthly range product."
         )
     else:
         st.info("No active monthly Polymarket one-touch.")
