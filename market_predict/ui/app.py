@@ -156,9 +156,14 @@ if view.vix is not None:
     m4.metric("VIX", f"{view.vix.current:.2f}", f"{vix_delta:+.2f} vs 1m avg", delta_color="inverse")
 else:
     m4.metric("VIX", "n/a")
-if view.options_wall:
-    m5.metric("ATM IV", f"{view.options_wall.atm_iv * 100:.1f}%")
-    pc = view.options_wall.total_put_oi / max(view.options_wall.total_call_oi, 1)
+# Defensive: an old cached snapshot may have wall != None but with all-zero
+# OI from the pre-fix compute_wall logic. Treat that as "no wall available"
+# so we don't display misleading $0-OI numbers.
+_wall = view.options_wall
+_wall_ok = _wall is not None and (_wall.call_wall_oi > 0 or _wall.put_wall_oi > 0)
+if _wall_ok:
+    m5.metric("ATM IV", f"{_wall.atm_iv * 100:.1f}%")
+    pc = _wall.total_put_oi / max(_wall.total_call_oi, 1)
     m6.metric("P/C OI", f"{pc:.2f}")
 else:
     m5.metric("ATM IV", "n/a")
@@ -181,12 +186,12 @@ with row1_r:
 
 
 st.markdown("##### Options walls")
-if view.options_wall:
+if _wall_ok:
     row2_l, row2_r = st.columns([2.5, 1])
     with row2_l:
         st.plotly_chart(charts.options_wall(view), use_container_width=True)
     with row2_r:
-        w = view.options_wall
+        w = _wall
         st.metric("Call wall", f"${w.call_wall_strike:.0f}", f"{w.call_wall_oi:,} OI")
         st.metric("Put wall", f"${w.put_wall_strike:.0f}", f"{w.put_wall_oi:,} OI")
         st.metric("Max pain", f"${w.max_pain:.0f}")
