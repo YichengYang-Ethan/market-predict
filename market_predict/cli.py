@@ -86,27 +86,41 @@ def build_view(symbol: str) -> TickerView:
         f_poly_cuts = pool.submit(_safe, fetch_rate_cuts_count_2026, default=None, label="poly cuts")
         f_poly_largest = pool.submit(_safe, fetch_largest_company_event, default=None, label="poly largest")
 
-        # Resolve
-        spot = f_spot.result()
-        expirations = f_expirations.result()
-        underlying_value = f_underlying.result()
-        history = f_history.result()
-        vix = f_vix.result()
-        futures = f_futures.result()
-        yearly = f_yearly.result()
-        daily = f_daily.result()
-        year_max = f_year_max.result()
-        year_min = f_year_min.result()
-        meetings = f_meetings.result()
-        rate_cut_count = f_rate_count.result()
-        recession = f_recession.result()
-        poly_monthly = f_poly_monthly.result()
-        poly_daily = f_poly_daily.result()
-        poly_premarket = f_poly_premarket.result()
-        poly_close_brackets = f_poly_close.result()
-        poly_fed = f_poly_fed.result()
-        poly_cuts = f_poly_cuts.result()
-        poly_largest = f_poly_largest.result()
+        # Resolve with a hard 15s per-future deadline. yfinance has internal
+        # retry loops that can hang 60+ seconds on rate-limited shared IPs;
+        # we'd rather show "n/a" than make the user wait 2 minutes.
+        from concurrent.futures import TimeoutError as FuturesTimeout
+
+        def _r(fut, default, label):
+            try:
+                return fut.result(timeout=15)
+            except FuturesTimeout:
+                print(f"  ({label} timed out after 15s)", file=sys.stderr)
+                return default
+            except Exception as exc:
+                print(f"  ({label} raised: {exc})", file=sys.stderr)
+                return default
+
+        spot = _r(f_spot, 0.0, "spot")
+        expirations = _r(f_expirations, (), "expirations")
+        underlying_value = _r(f_underlying, 0.0, "underlying")
+        history = _r(f_history, None, "history")
+        vix = _r(f_vix, None, "vix")
+        futures = _r(f_futures, None, "futures")
+        yearly = _r(f_yearly, [], "yearly")
+        daily = _r(f_daily, [], "daily")
+        year_max = _r(f_year_max, [], "year_max")
+        year_min = _r(f_year_min, [], "year_min")
+        meetings = _r(f_meetings, [], "meetings")
+        rate_cut_count = _r(f_rate_count, None, "rate_cut_count")
+        recession = _r(f_recession, [], "recession")
+        poly_monthly = _r(f_poly_monthly, None, "poly_monthly")
+        poly_daily = _r(f_poly_daily, None, "poly_daily")
+        poly_premarket = _r(f_poly_premarket, None, "poly_premarket")
+        poly_close_brackets = _r(f_poly_close, None, "poly_close")
+        poly_fed = _r(f_poly_fed, None, "poly_fed")
+        poly_cuts = _r(f_poly_cuts, None, "poly_cuts")
+        poly_largest = _r(f_poly_largest, None, "poly_largest")
 
     # Options chain depends on spot + expirations → fetch sequentially after
     expiry = pick_near_monthly_expiry(expirations) if expirations else None
