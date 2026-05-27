@@ -69,7 +69,9 @@ jobs:
             echo "No snapshot diffs — skipping commit."
           fi
 
-      - name: Ping Streamlit app to keep warm
+      - name: Ping HF Space (primary) and Streamlit Cloud (legacy) to keep warm
         run: |
-          curl -s -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" \
-            https://market-predict.streamlit.app/ || true
+          for url in https://ethanyang85-market-predict.hf.space/ https://market-predict.streamlit.app/; do
+            curl -s -o /dev/null -w "$url -> HTTP %{http_code} in %{time_total}s\n" \
+              --max-time 30 "$url" || true
+          done

@@ -2,7 +2,9 @@
 
 Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data feeds — spot, options walls, Kalshi prediction-market distributions, Polymarket binary bets, Fed path — into one Streamlit page with zero auth keys, zero servers, and zero ongoing cost.
 
-> **Deploy your own free copy** in 5 minutes via [share.streamlit.io](https://share.streamlit.io): pick this repo, branch `main`, file `streamlit_app.py`. The URL you choose (e.g. `your-name.streamlit.app`) is shareable — anyone with the link can view, no login.
+**🔗 Live demo**: <https://ethanyang85-market-predict.hf.space/> (hosted free on Hugging Face Spaces, no login)
+
+> Want your own copy? See [Deploy](#deploy) below — Hugging Face Spaces is the recommended path (Docker, no idle hibernation). Streamlit Community Cloud also works as an alternative.
 
 ---
 
@@ -12,7 +14,7 @@ Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data 
 |---|---|---|
 | **Header** | spot · underlying · futures (overnight) · VIX · ATM IV · P/C OI | yfinance |
 | **Row 1** | 3-month K-line + volume · VIX 1m mini | yfinance |
-| **Row 2** | Options walls (call/put OI, max pain, γ flip) · key levels | yfinance options chain |
+| **Row 2** | Options walls (call/put OI, max pain, γ flip) · key levels | yfinance options chain (often unavailable for SPY/QQQ — see [Limitations](#limitations)) |
 | **Row 3** | Daily close brackets — **Kalshi + Polymarket overlaid** · today's UP/DOWN binary | Kalshi `KXINX` · Polymarket `closes above` |
 | **Row 4** | FOMC stacked path · Kalshi rate-cuts count · Polymarket next-FOMC outcomes | Kalshi `KXFEDDECISION`, `KXRATECUTCOUNT` · Polymarket |
 | **Tabs** | Monthly one-touch · Yearly distribution + year-max/min · Recession gauge · Mag 7 ranking · 2026 cuts count | Polymarket · Kalshi `KXINXY`, `KXINXMAXY/MINY`, `KXRECSSNBER` · Polymarket `big-tech` |
@@ -31,7 +33,7 @@ The footer of the page tells you which path served the current view.
 
 ### How snapshots stay fresh
 
-A GitHub Actions cron (`.github/workflows/refresh-snapshot.yml`) runs every 15 minutes on a fresh runner — no Yahoo throttle, no Streamlit shared IP — calls `python -m market_predict.refresh_snapshot`, and commits the new `data/snapshot_*.json` files back to `main`. The same workflow `curl`s the Streamlit URL to keep the container warm and dodge the 12-hour idle spin-down. Public-repo Actions minutes are unlimited, so this is genuinely free.
+A GitHub Actions cron (`.github/workflows/refresh-snapshot.yml`) runs every 15 minutes on a fresh runner — no Yahoo throttle, no shared cloud IP — calls `python -m market_predict.refresh_snapshot`, and commits the new `data/snapshot_*.json` files to the dedicated `snapshots` branch (not `main`, to avoid redeploy churn). Both HF Spaces and Streamlit Cloud read the snapshot files over HTTP via `cdn.statically.io` (a global GitHub CDN, 1–4 s vs raw.githubusercontent's 5–30 s). The workflow also `curl`s the live URL to keep containers warm. Public-repo Actions minutes are unlimited, so this is genuinely free.
 
 If the workflow ever stalls and the snapshot is over 30 minutes old, the Streamlit app silently falls back to a live fetch — no broken page.
 
@@ -53,11 +55,35 @@ pip install -e .
 python -m market_predict SPY
 ```
 
-### Deploy to Streamlit Community Cloud
+## Deploy
+
+### Hugging Face Spaces (recommended)
+
+The [live demo](https://ethanyang85-market-predict.hf.space/) runs here. HF Spaces gives free Docker hosting with no idle hibernation — closer to "always-on" than Streamlit Cloud's 12h spin-down.
+
+1. Sign up at <https://huggingface.co> · New Space → SDK: **Docker** · template: **Blank**
+2. `git clone` your new Space's repo (a separate repo from this one), and copy in:
+   - The `market_predict/` package + `requirements.txt` + `pyproject.toml` from this repo
+   - A `Dockerfile` that runs `streamlit run market_predict/ui/app.py` directly (do **not** use `streamlit_app.py` — Python's `sys.modules` cache makes the import-shim pattern break Streamlit reruns)
+   - A `README.md` with HF Space frontmatter at the top:
+     ```yaml
+     ---
+     title: Market Predict
+     emoji: 📊
+     sdk: docker
+     app_port: 8501
+     license: mit
+     ---
+     ```
+3. `git push` → HF auto-builds the container, ~60s to RUNNING.
+
+### Streamlit Community Cloud (alternative)
 
 1. Fork this repo on GitHub
 2. [share.streamlit.io](https://share.streamlit.io) → New app → connect repo, branch `main`, file `streamlit_app.py`
 3. Deploy. Auto-redeploys on every push to `main`. No secrets to configure.
+
+> ⚠️ Streamlit Cloud's free tier hibernates after 12h idle. First click after sleep takes 30-60s to wake the container (no way around it from outside). The GitHub Actions cron in this repo includes a warm-ping but it's best-effort. HF Spaces avoids this entirely.
 
 ## Data sources (all free, all public)
 
@@ -122,12 +148,16 @@ See [commit `e2c1141`](https://github.com/YichengYang-Ethan/market-predict/commi
 ├──────────┴──────────┴───────────┴────────┴─────────┴───────────────────┤
 │ Row 1:  3-month K-line + Volume        │ VIX 1m mini                  │
 │ Row 2:  Options walls (OI bars)        │ Call wall / Put wall / γ flip │
+│         (often unavailable — see Limitations)                          │
 │ Row 3:  Daily brackets (Kalshi + Poly) │ P(close UP) / P(open UP)     │
 │ Row 4:  FOMC path  │ 2026 cuts (Kalshi) │ Next FOMC (Polymarket)      │
 ├────────────────────────────────────────────────────────────────────────┤
+│ [📊 Show extras]  ← click to reveal the tabs below                    │
 │ [Monthly] [Yearly] [Macro/Recession] [Mag 7] [2026 Cuts]              │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+Extras are hidden by default so first load lands under ~10 s on free hosting. Click the button to render the additional tabs.
 
 Color convention:
 - 🟣 Kalshi data series — purple
@@ -138,11 +168,13 @@ Color convention:
 
 ## Limitations
 
-- yfinance options data is ~15 min delayed (fine for daily walls; not for intraday 0DTE)
+- **Options walls panel is currently dark for SPY/QQQ.** Yahoo Finance stopped publishing real near-spot OI for large ETFs around 2024 — yfinance returns rows for every strike but OI=0 and IV≈0 across the entire ATM band. Restoring this panel requires a paid feed (Tradier, Polygon, CBOE DataShop), which violates the project's zero-auth goal. The dashboard now displays an "Options walls unavailable" notice instead of misleading $0-OI walls.
+- yfinance spot / history / VIX / futures are ~15 min delayed (fine for daily context; not for intraday 0DTE)
 - Kalshi yearly buckets are wide ($25 SPX / $50 NDX) — long tails carry mass outside the central display zone
 - SPY/QQQ are ETFs; Kalshi only lists S&P 500 (`^GSPC`) and Nasdaq 100 (`^NDX`) cash-index contracts. ETF→index basis ignored
-- No historical snapshots yet — coming in v0.2
+- Polymarket monthly one-touch chart has an intentional gap around spot: Polymarket only lists OTM strikes (HIGH > spot, LOW < spot) since ATM contracts would already be trivially resolved
 - Polymarket low-volume strikes give noisy cumulative pricing; the monotonization fix smooths but does not eliminate this
+- No historical snapshots yet — coming in v0.2
 
 ## Roadmap
 
