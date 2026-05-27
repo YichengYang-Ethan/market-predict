@@ -44,12 +44,22 @@ def compute_wall(
 
     calls = _filter_by_strike(calls, spot * 0.75, spot * 1.25)
     puts = _filter_by_strike(puts, spot * 0.75, spot * 1.25)
+    # Drop rows with no real OI: yfinance returns rows for every listed strike,
+    # but many ATM strikes carry OI=0 (Yahoo stopped publishing real OI for
+    # large-ETF chains around 2024). Without this filter we'd pick a random
+    # zero-OI strike as the "wall" and display $0 OI — actively misleading.
+    calls = calls[calls.openInterest > 0]
+    puts = puts[puts.openInterest > 0]
     if len(calls) == 0 or len(puts) == 0:
         return None
 
-    # Near-the-money walls (tradable, not crash hedges)
+    # Near-the-money walls (tradable, not crash hedges). If nothing within ±8%,
+    # the chain is effectively dead in this band — better to abort than report
+    # a deep-OTM crash-hedge strike as a tradable wall.
     calls_near = _filter_by_strike(calls, spot * 0.92, spot * 1.08)
     puts_near = _filter_by_strike(puts, spot * 0.92, spot * 1.08)
+    if len(calls_near) == 0 and len(puts_near) == 0:
+        return None
     call_wall_row = (calls_near if len(calls_near) else calls).loc[
         (calls_near if len(calls_near) else calls).openInterest.idxmax()
     ]

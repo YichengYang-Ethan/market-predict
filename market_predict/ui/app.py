@@ -195,7 +195,10 @@ if view.options_wall:
             f"${w.gamma_flip:.0f}" if w.gamma_flip is not None else "n/a",
         )
 else:
-    st.info("No options chain available for this ticker.")
+    st.info(
+        "Options walls unavailable — Yahoo Finance stopped publishing real near-spot OI "
+        "for large ETFs (SPY/QQQ) around 2024. All other panels use live data."
+    )
 
 st.markdown("")
 
@@ -331,6 +334,8 @@ with tab_monthly:
             f"**One-touch contracts** · Yes resolves if the underlying touches "
             f"the strike at any point before {view.polymarket_monthly.end_date}. "
             f"Not mutually exclusive — each strike is its own bet. "
+            f"**Gap around spot is intentional**: Polymarket only lists OTM strikes "
+            f"(HIGH > spot, LOW < spot) since ATM contracts would already be resolved. "
             f"Source: Polymarket, event vol24 ≈ ${view.polymarket_monthly.volume_24h:,.0f}. "
             f"(Kalshi does not currently list monthly range contracts.)"
         )
