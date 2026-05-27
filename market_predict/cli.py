@@ -86,16 +86,21 @@ def build_view(symbol: str) -> TickerView:
         f_poly_cuts = pool.submit(_safe, fetch_rate_cuts_count_2026, default=None, label="poly cuts")
         f_poly_largest = pool.submit(_safe, fetch_largest_company_event, default=None, label="poly largest")
 
-        # Resolve with a hard 15s per-future deadline. yfinance has internal
-        # retry loops that can hang 60+ seconds on rate-limited shared IPs;
-        # we'd rather show "n/a" than make the user wait 2 minutes.
+        # Wall-clock TOTAL deadline (was: 15s per future = 300s worst case
+        # when chained sequentially). Now: every future shares a single
+        # ~25s budget. yfinance hangs on rate-limited IPs, so this caps
+        # the worst case at ~25s instead of 5 min.
+        import time
         from concurrent.futures import TimeoutError as FuturesTimeout
 
+        deadline = time.monotonic() + 25.0
+
         def _r(fut, default, label):
+            remaining = max(0.05, deadline - time.monotonic())
             try:
-                return fut.result(timeout=15)
+                return fut.result(timeout=remaining)
             except FuturesTimeout:
-                print(f"  ({label} timed out after 15s)", file=sys.stderr)
+                print(f"  ({label} timed out, remaining={remaining:.1f}s)", file=sys.stderr)
                 return default
             except Exception as exc:
                 print(f"  ({label} raised: {exc})", file=sys.stderr)
