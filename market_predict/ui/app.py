@@ -301,11 +301,21 @@ st.markdown("")
 
 
 # ─────────────────────────── TABS row ───────────────────────────────
+# Streamlit `st.tabs` is eager — *all* tab content renders on every
+# rerun, even tabs you don't click. With 6 extra Plotly charts that
+# adds ~2-3s on slow shared-CPU instances. Gate them behind a button
+# so the first load only paints the essentials (5 charts in rows 1-4).
 
-
-tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
-    ["Monthly", "Yearly", "Macro / Recession", "Mag 7", "2026 Cuts"]
-)
+if st.session_state.get("show_extras", False):
+    tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
+        ["Monthly", "Yearly", "Macro / Recession", "Mag 7", "2026 Cuts"]
+    )
+else:
+    if st.button("📊  Show extras — Monthly, Yearly, Recession, Mag 7, 2026 Cuts", type="secondary"):
+        st.session_state.show_extras = True
+        st.rerun()
+    st.caption("Hidden by default to keep first load under ~10 s. Click to reveal.")
+    st.stop()
 
 with tab_monthly:
     if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
