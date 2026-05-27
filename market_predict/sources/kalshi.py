@@ -1,5 +1,6 @@
 """Kalshi public API: read-only access to active markets (no auth required)."""
 from __future__ import annotations
+import time
 from typing import Optional
 
 import requests
@@ -11,13 +12,25 @@ BASE = "https://api.elections.kalshi.com/trade-api/v2"
 
 
 def _fetch_markets(series_ticker: str, limit: int = 100) -> list[dict]:
-    r = requests.get(
-        f"{BASE}/markets",
-        params={"series_ticker": series_ticker, "status": "open", "limit": limit},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json().get("markets", [])
+    # Kalshi rate-limits shared IPs (GitHub Actions, Streamlit Cloud) aggressively.
+    # When 8 series_tickers fire in parallel we routinely lose 1-3 to 429. Retry
+    # with backoff handles the transient case; the snapshot pipeline still has a
+    # cross-run fallback for whatever still fails.
+    delays = (0.5, 2.0, 5.0)  # 3 retries
+    last_exc = None
+    for delay in (0, *delays):
+        if delay:
+            time.sleep(delay)
+        r = requests.get(
+            f"{BASE}/markets",
+            params={"series_ticker": series_ticker, "status": "open", "limit": limit},
+            timeout=15,
+        )
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r.json().get("markets", [])
+        last_exc = requests.HTTPError(f"429 Too Many Requests for {series_ticker}")
+    raise last_exc
 
 
 def _yes_mid(m: dict) -> float:
