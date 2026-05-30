@@ -12,9 +12,9 @@ Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data 
 
 | Row | Panels | Sources |
 |---|---|---|
-| **Header** | spot · underlying · futures (overnight) · VIX · ATM IV · P/C OI | yfinance |
+| **Header** | spot · underlying · futures (overnight) · VIX · ATM IV · P/C OI | yfinance · CBOE (ATM IV, P/C OI) |
 | **Row 1** | 3-month K-line + volume · VIX 1m mini | yfinance |
-| **Row 2** | Options walls (call/put OI, max pain, γ flip) · key levels | yfinance options chain (often unavailable for SPY/QQQ — see [Limitations](#limitations)) |
+| **Row 2** | Options walls (call/put OI, max pain, γ flip) · key levels | CBOE delayed quotes |
 | **Row 3** | Daily close brackets — **Kalshi + Polymarket overlaid** · today's UP/DOWN binary | Kalshi `KXINX` · Polymarket `closes above` |
 | **Row 4** | FOMC stacked path · Kalshi rate-cuts count · Polymarket next-FOMC outcomes | Kalshi `KXFEDDECISION`, `KXRATECUTCOUNT` · Polymarket |
 | **Tabs** | Monthly one-touch · Yearly distribution + year-max/min · Recession gauge · Mag 7 ranking · 2026 cuts count | Polymarket · Kalshi `KXINXY`, `KXINXMAXY/MINY`, `KXRECSSNBER` · Polymarket `big-tech` |
@@ -89,9 +89,16 @@ The [live demo](https://ethanyang85-market-predict.hf.space/) runs here. HF Spac
 
 ### yfinance
 - Spot price, 3-month OHLCV history (auto-adjust off)
-- Options chain — call/put OI, IV, expirations (15-min delayed OPRA)
 - VIX (`^VIX`) — 1-month history + spot
 - E-mini futures (`ES=F` / `NQ=F`) — overnight change vs previous close
+
+### CBOE delayed quotes (no auth)
+Endpoint: `cdn.cboe.com/api/global/delayed_quotes/options/{SYM}.json` (indices prefixed `_`, e.g. `_SPX`).
+
+- Full options chain — call/put **open interest**, exchange-computed greeks (delta, gamma, theta, vega), IV, volume
+- Powers Row 2 walls, max pain, gamma flip, and the header ATM IV / P/C OI
+- **Why not yfinance for options**: Yahoo returns OI≈0 for SPY/QQQ outside RTH, so the panel went dark every evening/weekend. CBOE serves the last session's snapshot 24/7, and OI is an end-of-day figure anyway (OCC publishes pre-open), so a delayed snapshot is the right granularity for walls.
+- Caveat: undocumented CDN endpoint (behind cboe.com's delayed-quote pages); 15-min delayed; could change without notice.
 
 ### Kalshi public API (no auth)
 Endpoint: `api.elections.kalshi.com/trade-api/v2/markets?series_ticker=X`
@@ -148,7 +155,6 @@ See [commit `e2c1141`](https://github.com/YichengYang-Ethan/market-predict/commi
 ├──────────┴──────────┴───────────┴────────┴─────────┴───────────────────┤
 │ Row 1:  3-month K-line + Volume        │ VIX 1m mini                  │
 │ Row 2:  Options walls (OI bars)        │ Call wall / Put wall / γ flip │
-│         (often unavailable — see Limitations)                          │
 │ Row 3:  Daily brackets (Kalshi + Poly) │ P(close UP) / P(open UP)     │
 │ Row 4:  FOMC path  │ 2026 cuts (Kalshi) │ Next FOMC (Polymarket)      │
 ├────────────────────────────────────────────────────────────────────────┤
@@ -168,7 +174,7 @@ Color convention:
 
 ## Limitations
 
-- **Options walls panel is currently dark for SPY/QQQ.** Yahoo Finance stopped publishing real near-spot OI for large ETFs around 2024 — yfinance returns rows for every strike but OI=0 and IV≈0 across the entire ATM band. Restoring this panel requires a paid feed (Tradier, Polygon, CBOE DataShop), which violates the project's zero-auth goal. The dashboard now displays an "Options walls unavailable" notice instead of misleading $0-OI walls.
+- **Options data is 15-min delayed and end-of-day for OI.** The walls panel uses CBOE's free delayed-quote CDN (`cdn.cboe.com/.../delayed_quotes`), which switched in after yfinance stopped publishing real near-spot OI for large ETFs (yfinance returned OI≈0 across the ATM band, blanking the panel after hours). CBOE serves the last session's snapshot 24/7 with real OI + greeks — fine for daily context, not for intraday 0DTE. It's an undocumented endpoint and could change without notice.
 - yfinance spot / history / VIX / futures are ~15 min delayed (fine for daily context; not for intraday 0DTE)
 - Kalshi yearly buckets are wide ($25 SPX / $50 NDX) — long tails carry mass outside the central display zone
 - SPY/QQQ are ETFs; Kalshi only lists S&P 500 (`^GSPC`) and Nasdaq 100 (`^NDX`) cash-index contracts. ETF→index basis ignored

@@ -29,13 +29,12 @@ from market_predict.sources.polymarket import (
     fetch_premarket_updown,
     fetch_rate_cuts_count_2026,
 )
+from market_predict.sources.cboe import get_options_chain, list_expirations
 from market_predict.sources.yfin import (
     get_futures,
     get_history,
-    get_options_chain,
     get_spot,
     get_vix,
-    list_expirations,
     pick_near_monthly_expiry,
 )
 from market_predict.tickers import TICKER_MAP, get_config

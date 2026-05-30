@@ -44,10 +44,9 @@ def compute_wall(
 
     calls = _filter_by_strike(calls, spot * 0.75, spot * 1.25)
     puts = _filter_by_strike(puts, spot * 0.75, spot * 1.25)
-    # Drop rows with no real OI: yfinance returns rows for every listed strike,
-    # but many ATM strikes carry OI=0 (Yahoo stopped publishing real OI for
-    # large-ETF chains around 2024). Without this filter we'd pick a random
-    # zero-OI strike as the "wall" and display $0 OI — actively misleading.
+    # Drop rows with no real OI: the chain lists every strike, but far strikes
+    # legitimately carry OI=0. Without this filter we could pick a zero-OI strike
+    # as the "wall" and display $0 OI — actively misleading.
     calls = calls[calls.openInterest > 0]
     puts = puts[puts.openInterest > 0]
     if len(calls) == 0 or len(puts) == 0:

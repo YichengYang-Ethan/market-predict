@@ -49,6 +49,12 @@ def _encode(obj: Any) -> Any:
         }
     if is_dataclass(obj):
         return {f.name: _encode(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, SimpleNamespace):
+        # A field back-filled from a previous snapshot is a decoded
+        # SimpleNamespace, not its original dataclass. Re-encode it the same way
+        # so the fallback merge survives a second save→load round-trip (without
+        # this branch it falls through to str() and the field is corrupted).
+        return {k: _encode(v) for k, v in vars(obj).items() if not k.startswith("_")}
     if isinstance(obj, dict):
         return {k: _encode(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

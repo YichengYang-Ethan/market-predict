@@ -28,16 +28,17 @@ PREVIOUS_SNAPSHOT_URL = (
 )
 
 # Fields that are safe to back-fill from the previous snapshot when the current
-# build returned None / empty list (typically Kalshi 429 or Polymarket timeout).
+# build returned None / empty list (typically Kalshi 429, Polymarket timeout, or
+# a CBOE CDN read-timeout). The options panel (wall + both chains) is back-filled
+# as a unit — the wall chart needs all three (see charts.options_wall) — so a
+# transient CBOE failure shows a slightly stale panel instead of a blank one.
 # Excluded:
-#   - options_wall: None is a real state (Yahoo no longer publishes near-spot OI
-#     for SPY/QQQ), not a transient failure. Reintroducing an old wall would
-#     misrepresent.
-#   - calls_chain / puts_chain: large pandas DataFrames; fallback adds bytes
-#     with no chart consumer (charts.options_wall only uses options_wall).
 #   - spot / underlying_value / history / vix / futures: yfinance failures are
 #     rare and we'd rather show "n/a" than a stale price.
 FALLBACK_FIELDS = (
+    "options_wall",
+    "calls_chain",
+    "puts_chain",
     "kalshi_yearly",
     "kalshi_daily",
     "kalshi_year_max",

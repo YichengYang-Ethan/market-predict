@@ -201,8 +201,8 @@ if _wall_ok:
         )
 else:
     st.info(
-        "Options walls unavailable — Yahoo Finance stopped publishing real near-spot OI "
-        "for large ETFs (SPY/QQQ) around 2024. All other panels use live data."
+        "Options walls unavailable — the CBOE delayed-quote feed returned no near-spot "
+        "open interest for this snapshot. All other panels use live data."
     )
 
 st.markdown("")
