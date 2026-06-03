@@ -15,11 +15,136 @@ import streamlit as st
 
 from market_predict.cli import build_view
 from market_predict.snapshot import load_snapshot, load_snapshot_from_text
+from market_predict.sources.yfin import get_cross_asset
 from market_predict.tickers import TICKER_MAP, get_config
+from market_predict.transforms.setup import build_setup
 from market_predict.ui import charts
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_cross_asset():
+    """Small macro cross-section (5 ETFs), cached so reruns don't refetch."""
+    return get_cross_asset()
+
+
 st.set_page_config(page_title="market-predict", page_icon="📊", layout="wide")
+
+# ── Visual chrome. Editorial style ported from yichengyang-ethan.github.io:
+#    warm cream canvas, deep-red accent, Source Serif 4 headlines, Inter UI
+#    labels, JetBrains-Mono numbers, white cards with warm borders. Pure CSS. ──
+st.markdown(
+    """
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+      :root {
+        --bg:#faf9f7; --text:#1a1a1a; --text2:#555; --accent:#c4170c;
+        --accent-light:#fef2f1; --border:#e5e3df; --card:#fff; --code:#f5f4f0;
+        --shadow:0 1px 3px rgba(26,26,26,.05); --shadow-lg:0 6px 22px rgba(26,26,26,.08);
+      }
+
+      /* base */
+      html, body, [class*="css"], .stApp, .stMarkdown, p, li, span, label,
+        [data-testid="stWidgetLabel"] { font-family:'Inter', sans-serif; }
+      .stApp { background:var(--bg); }
+      .block-container { padding-top:1.1rem !important; padding-bottom:2.5rem !important; max-width:1280px; }
+      [data-testid="stToolbar"], #MainMenu, footer { display:none; }
+      header[data-testid="stHeader"] { background:transparent; height:0; }
+
+      /* ── editorial header (mirrors site <header>) ── */
+      .mp-head { border-bottom:1px solid var(--border); padding:4px 0 22px; margin:0 0 24px; }
+      .mp-eyebrow { font-family:'Inter',sans-serif; font-size:12px; font-weight:600; letter-spacing:1.5px;
+        text-transform:uppercase; color:var(--accent); margin-bottom:12px; }
+      .mp-head h1 { font-family:'Source Serif 4',Georgia,serif; font-size:40px; line-height:1.12;
+        font-weight:700; letter-spacing:-.5px; color:var(--text); margin:0 0 12px; }
+      .mp-sub { font-family:'Source Serif 4',Georgia,serif; font-size:19px; color:var(--text2);
+        line-height:1.5; margin:0; }
+      .mp-sub .mp-mono { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); }
+
+      /* ── section headings: dark label, cream rule + short accent tick (Krish) ── */
+      h5 { font-family:'Inter',sans-serif !important; font-size:12.5px !important; font-weight:700 !important;
+        letter-spacing:1.6px; text-transform:uppercase; color:var(--text) !important;
+        margin:32px 0 16px !important; padding:0 0 9px 0 !important; position:relative;
+        border-bottom:1px solid var(--border); }
+      h5::after { content:''; position:absolute; left:0; bottom:-1px; width:46px; height:2px; background:var(--accent); }
+
+      /* ── metric tiles → institutional stat-cards (cream header strip + value body) ── */
+      [data-testid="stMetric"] { background:var(--card); border:1px solid var(--border); border-radius:8px;
+        padding:0 0 6px 0; overflow:hidden; box-shadow:var(--shadow);
+        transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+      [data-testid="stMetric"]:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); border-color:var(--accent); }
+      [data-testid="stMetricLabel"] { background:var(--code); border-bottom:1px solid var(--border);
+        padding:6px 14px 5px !important; margin:0 0 4px 0 !important; width:100%; }
+      [data-testid="stMetricLabel"] p { font-family:'Inter',sans-serif !important; font-weight:600 !important;
+        font-size:.67rem !important; text-transform:uppercase; letter-spacing:.09em; color:var(--text2) !important; }
+      [data-testid="stMetricValue"] { font-family:'JetBrains Mono',monospace !important; color:var(--text) !important;
+        font-weight:700 !important; font-size:1.5rem !important; padding:6px 14px 0 !important; }
+      [data-testid="stMetricDelta"] { font-family:'JetBrains Mono',monospace !important; font-size:.76rem !important;
+        padding:1px 14px 0 !important; }
+
+      /* ── plotly charts → cards ── */
+      [data-testid="stPlotlyChart"] { background:var(--card); border:1px solid var(--border); border-radius:10px;
+        padding:10px 12px 4px; box-shadow:var(--shadow); transition:box-shadow .2s ease, border-color .2s ease; }
+      [data-testid="stPlotlyChart"]:hover { box-shadow:var(--shadow-lg); border-color:#dcd8cf; }
+      /* hide Plotly's hover toolbar (camera/zoom/pan) for a cleaner, static look */
+      .js-plotly-plot .modebar { display:none !important; }
+
+      /* ── synthesis callout + inline breakdown (no click-to-expand) ── */
+      .mp-callout { background:var(--accent-light); border:1px solid #f3d9d6; border-left:4px solid var(--accent);
+        padding:15px 22px; margin:6px 0 4px; border-radius:0 8px 8px 0; }
+      .mp-callout .t { font-family:'Inter',sans-serif; font-weight:700; color:var(--accent); font-size:.74rem;
+        text-transform:uppercase; letter-spacing:.09em; }
+      .mp-callout .v { font-family:'Source Serif 4',Georgia,serif; color:var(--text); font-size:1.12rem;
+        line-height:1.4; margin-top:4px; }
+      .mp-breakdown { margin:2px 0 10px 2px; }
+      .mp-breakdown p { font-family:'Inter',sans-serif; color:var(--text2); font-size:.84rem; line-height:1.5; margin:0; }
+      .mp-breakdown li { font-family:'Inter',sans-serif; color:var(--text2); font-size:.84rem; line-height:1.6; }
+      .mp-breakdown strong, .mp-breakdown b { color:var(--text); font-weight:600; }
+
+      /* ── controls strip ── */
+      .st-key-mpctrl { background:var(--card); border:1px solid var(--border); border-radius:8px;
+        padding:8px 14px 4px !important; box-shadow:var(--shadow); margin-bottom:8px; }
+      [data-testid="stSelectbox"] div[data-baseweb="select"] > div { border-color:var(--border) !important;
+        border-radius:6px; font-family:'Inter',sans-serif; }
+      [data-testid="stSelectbox"] div[data-baseweb="select"] > div:hover { border-color:var(--accent) !important; }
+
+      /* ── captions / buttons / tabs / alerts / footer ── */
+      [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {
+        font-family:'Inter',sans-serif; color:var(--text2); }
+      [data-testid="stExpander"] { border:1px solid var(--border) !important; border-radius:8px; background:var(--card); }
+      .stButton button { font-family:'Inter',sans-serif; border-radius:6px; font-weight:600;
+        border:1px solid var(--border); color:var(--text); background:var(--card); letter-spacing:.02em; }
+      .stButton button:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-light); }
+      .stTabs [data-baseweb="tab-list"] { gap:2px; border-bottom:2px solid var(--border); }
+      .stTabs [data-baseweb="tab"] { font-family:'Inter',sans-serif; font-size:.78rem; font-weight:600;
+        text-transform:uppercase; letter-spacing:.06em; color:var(--text2) !important; padding:8px 16px; }
+      .stTabs [data-baseweb="tab"]:hover { color:var(--text) !important; background:var(--code); }
+      .stTabs [aria-selected="true"] { color:var(--accent) !important; }
+      .stTabs [data-baseweb="tab-highlight"] { background:var(--accent) !important; height:3px; }
+      [data-testid="stAlert"] { border-radius:8px; font-family:'Inter',sans-serif; }
+      hr { border-color:var(--border); }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# When embedded in yichengyang-ethan.github.io (iframe ?site=1), the host page
+# already renders a "market-predict" header, so suppress this app's own header
+# and tighten the top padding for a seamless, single-page feel.
+IS_EMBED = st.query_params.get("site") == "1"
+if IS_EMBED:
+    # Trim top padding AND defeat Streamlit's inner scroll container so the app
+    # lays out at its full natural height — then the host iframe can grow to fit
+    # (no inner scrollbar) and document.body.scrollHeight reads true.
+    st.markdown(
+        "<style>"
+        ".block-container{padding-top:.4rem !important;}"
+        "[data-testid='stAppViewContainer'],section[data-testid='stMain'],"
+        "[data-testid='stAppViewContainer']>.main"
+        "{height:auto !important;max-height:none !important;overflow:visible !important;}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
 
 # Snapshot pipeline:
 # - A GitHub Actions cron writes data/snapshot_<SYM>.json to the `snapshots`
@@ -100,23 +225,28 @@ def _short_rate_cuts_outcome(question: str) -> str:
 # ────────────────────── Header (title + controls) ─────────────────────
 
 
-st.markdown(
-    "<h1 style='margin-bottom:0;'>market-predict</h1>"
-    "<p style='color:#7f8c8d;font-size:0.9em;margin-top:0;'>"
-    "SPY/QQQ trader context · spot · options walls · Kalshi & Polymarket predictions · Fed. "
-    "All sources free and public.</p>",
-    unsafe_allow_html=True,
-)
-
-ctrl_l, ctrl_r = st.columns([5, 1])
-with ctrl_l:
-    symbol = st.selectbox(
-        "Ticker", list(TICKER_MAP.keys()), index=0, label_visibility="collapsed"
+if not IS_EMBED:
+    st.markdown(
+        "<div class='mp-head'>"
+        "<div class='mp-eyebrow'>Live Market Dashboard</div>"
+        "<h1>market-predict</h1>"
+        "<p class='mp-sub'>SPY / QQQ trader context — spot, options walls, dealer gamma, "
+        "Kalshi &amp; Polymarket predictions, and the Fed path. "
+        "<span class='mp-mono'>free data · refreshed every 15 min</span></p>"
+        "</div>",
+        unsafe_allow_html=True,
     )
-with ctrl_r:
-    if st.button("Refresh", use_container_width=True):
-        load_view.clear()
-        st.rerun()
+
+with st.container(key="mpctrl"):
+    ctrl_l, ctrl_r = st.columns([5, 1])
+    with ctrl_l:
+        symbol = st.selectbox(
+            "Ticker", list(TICKER_MAP.keys()), index=0, label_visibility="collapsed"
+        )
+    with ctrl_r:
+        if st.button("Refresh", use_container_width=True):
+            load_view.clear()
+            st.rerun()
 
 with st.spinner(f"Fetching {symbol} data..."):
     try:
@@ -172,6 +302,49 @@ else:
 st.markdown("")  # subtle spacer instead of divider
 
 
+# ───────────────────── Today's setup (synthesis) ────────────────────
+# One read of the page: gamma regime + walls + positioning + vol + implied
+# direction, from fields already on `view` (no extra fetch). Descriptive, not
+# advice. See transforms/setup.py.
+
+
+_setup = build_setup(view)
+if _setup is not None:
+    st.markdown(
+        "<div class='mp-callout'>"
+        f"<div class='t'>Today's setup — {_setup.tag}</div>"
+        f"<div class='v'>{_setup.verdict}</div></div>",
+        unsafe_allow_html=True,
+    )
+    # Breakdown rendered inline (no click-to-expand) — the gamma / walls /
+    # positioning / vol / implied-direction reads behind the verdict above.
+    if _setup.lines:
+        import re as _re
+        _items = "".join(
+            "<p>• " + _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", _ln) + "</p>"
+            for _ln in _setup.lines
+        )
+        st.markdown(f"<div class='mp-breakdown'>{_items}</div>", unsafe_allow_html=True)
+
+
+# ───────────────────── Cross-asset risk strip ───────────────────────
+# Macro context the index page otherwise lacks (rates / credit / USD / gold /
+# oil). Live + cached; degrades to a caption when yfinance is throttled.
+
+
+st.markdown("##### Cross-asset")
+_ca = load_cross_asset()
+if _ca:
+    _cols = st.columns(len(_ca))
+    for _col, _a in zip(_cols, _ca):
+        _col.metric(_a.name, f"{_a.last:,.2f}", f"{_a.chg_1d:+.2f}% 1d")
+        _col.caption(f"5d {_a.chg_5d:+.2f}%")
+else:
+    st.caption("Cross-asset quotes unavailable (yfinance throttled). Try Refresh in a minute.")
+
+st.markdown("")
+
+
 # ───────────────────── ROW 1: K-line + VIX mini ─────────────────────
 
 
@@ -204,6 +377,28 @@ else:
         "Options walls unavailable — the CBOE delayed-quote feed returned no near-spot "
         "open interest for this snapshot. All other panels use live data."
     )
+
+st.markdown("")
+
+
+# ─────────────── ROW 2b: Dealer gamma (GEX) profile ─────────────────
+
+
+st.markdown("##### Dealer gamma profile (GEX)")
+if _wall_ok:
+    gex_l, gex_r = st.columns([2.5, 1])
+    with gex_l:
+        st.plotly_chart(charts.gex_profile(view), use_container_width=True)
+    with gex_r:
+        st.caption(
+            "Net dealer gamma vs price (dealers long calls / short puts). "
+            "**Above** the γ-flip → positive gamma: dealer hedging leans **against** "
+            "moves (vol-dampening, mean-reverting). **Below** → negative gamma: hedging "
+            "**chases** moves (vol-amplifying, breakout-prone). Same data as the walls, "
+            "recomputed from the snapshot chain. Magnitude is indicative."
+        )
+else:
+    st.info("GEX unavailable — no near-spot open interest in this snapshot.")
 
 st.markdown("")
 
@@ -308,22 +503,15 @@ with row4_c:
 st.markdown("")
 
 
-# ─────────────────────────── TABS row ───────────────────────────────
-# Streamlit `st.tabs` is eager — *all* tab content renders on every
-# rerun, even tabs you don't click. With 6 extra Plotly charts that
-# adds ~2-3s on slow shared-CPU instances. Gate them behind a button
-# so the first load only paints the essentials (5 charts in rows 1-4).
+# ─────────────────────────── More markets (tabs) ────────────────────
+# All tabs render inline — no click-to-reveal gate. st.tabs is eager, so
+# every panel paints on load; on a warm snapshot that is a couple extra
+# seconds, traded for everything being reachable without a click.
 
-if st.session_state.get("show_extras", False):
-    tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
-        ["Monthly", "Yearly", "Macro / Recession", "Mag 7", "2026 Cuts"]
-    )
-else:
-    if st.button("📊  Show extras — Monthly, Yearly, Recession, Mag 7, 2026 Cuts", type="secondary"):
-        st.session_state.show_extras = True
-        st.rerun()
-    st.caption("Hidden by default to keep first load under ~10 s. Click to reveal.")
-    st.stop()
+st.markdown("##### More markets")
+tab_monthly, tab_yearly, tab_macro, tab_mag7, tab_rates_2026 = st.tabs(
+    ["Monthly", "Yearly", "Macro / Recession", "Mag 7", "2026 Cuts"]
+)
 
 with tab_monthly:
     if view.polymarket_monthly is not None and view.polymarket_monthly.brackets:
@@ -479,3 +667,41 @@ _source_label = {
 st.caption(
     f"Data · {_ts_str}  ·  {_source_label}  ·  cache TTL · 15 min"
 )
+
+
+# When embedded (?site=1), report this app's full content height up to the host
+# page so the iframe can grow to fit — no inner scrollbar, the whole thing scrolls
+# as one page. The component runs same-origin with the Streamlit doc (so it can
+# read its height) and postMessages to window.top (the github.io page).
+if IS_EMBED:
+    import streamlit.components.v1 as _components
+    _components.html(
+        """
+        <script>
+        (function () {
+          function measure(d) {
+            // Streamlit's content lives in the block container (the body itself
+            // stays viewport-sized), so measure that — plus a few fallbacks.
+            var sels = ['[data-testid="stMainBlockContainer"]', '.block-container',
+                        '[data-testid="stAppViewContainer"]', 'section[data-testid="stMain"]'];
+            var h = 0, el;
+            for (var i = 0; i < sels.length; i++) {
+              el = d.querySelector(sels[i]);
+              if (el) h = Math.max(h, el.scrollHeight, el.offsetHeight,
+                                   Math.ceil(el.getBoundingClientRect().height));
+            }
+            return Math.max(h, d.body.scrollHeight, d.documentElement.scrollHeight);
+          }
+          function send() {
+            try { window.top.postMessage({ mpHeight: measure(window.parent.document) }, "*"); }
+            catch (e) {}
+          }
+          send();
+          setInterval(send, 600);
+          try { new ResizeObserver(send).observe(window.parent.document.body); } catch (e) {}
+          window.addEventListener("load", send);
+        })();
+        </script>
+        """,
+        height=0,
+    )

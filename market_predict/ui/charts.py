@@ -26,21 +26,24 @@ from plotly.subplots import make_subplots
 from market_predict.models import KalshiBracket, TickerView
 
 
+# Palette aligned to yichengyang-ethan.github.io brand tokens
+# (--green #16a34a, --accent #c4170c, --blue #2563eb, --orange #ea580c,
+# --purple #7c3aed). Semantic convention is unchanged — only the hexes.
 COLORS = {
-    "up": "#27ae60",
-    "down": "#c0392b",
-    "spot": "#2980b9",
-    "call_wall": "#16a085",
-    "put_wall": "#c0392b",
-    "max_pain": "#7f8c8d",
-    "gamma_flip": "#d35400",
-    "kalshi": "#8e44ad",
-    "kalshi_fill": "rgba(142, 68, 173, 0.55)",
-    "polymarket": "#f39c12",
-    "polymarket_fill": "rgba(243, 156, 18, 0.55)",
-    "vix": "#8e44ad",
-    "neutral_text": "#2c3e50",
-    "grid": "rgba(0,0,0,0.06)",
+    "up": "#16a34a",
+    "down": "#c4170c",
+    "spot": "#2563eb",
+    "call_wall": "#16a34a",
+    "put_wall": "#c4170c",
+    "max_pain": "#8a8579",
+    "gamma_flip": "#ea580c",
+    "kalshi": "#7c3aed",
+    "kalshi_fill": "rgba(124, 58, 237, 0.50)",
+    "polymarket": "#d99008",
+    "polymarket_fill": "rgba(217, 144, 8, 0.50)",
+    "vix": "#7c3aed",
+    "neutral_text": "#1a1a1a",
+    "grid": "rgba(26,26,26,0.07)",
 }
 
 
@@ -49,7 +52,7 @@ def _apply_theme(fig: go.Figure, *, title: str | None = None, height: int = 380)
     fig.update_layout(
         template="plotly_white",
         title=dict(text=title, font=dict(size=14, color=COLORS["neutral_text"])) if title else None,
-        font=dict(family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size=12),
+        font=dict(family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size=12, color=COLORS["neutral_text"]),
         height=height,
         margin=dict(t=60 if title else 30, b=40, l=50, r=20),
         plot_bgcolor="rgba(0,0,0,0)",
@@ -87,7 +90,7 @@ def price_history(view: TickerView) -> go.Figure:
     )
 
     colors = [
-        f"rgba(39, 174, 96, 0.45)" if c >= o else "rgba(192, 57, 43, 0.45)"
+        "rgba(39, 174, 96, 0.45)" if c >= o else "rgba(192, 57, 43, 0.45)"
         for c, o in zip(df["Close"], df["Open"])
     ]
     fig.add_trace(
@@ -632,9 +635,11 @@ def fed_path(view: TickerView) -> go.Figure:
             y=sub["meeting"], x=sub["prob"],
             name=outcome, orientation="h",
             marker_color=color_for(outcome),
-            text=[f"{p:.0f}%" if p >= 5 else "" for p in sub["prob"]],
+            text=[f"{p:.0f}%" if p >= 7 else "" for p in sub["prob"]],
             textposition="inside",
-            insidetextfont=dict(color="white", size=11),
+            insidetextanchor="middle",
+            insidetextfont=dict(color="white", size=10),
+            constraintext="inside",
             hovertemplate=f"{outcome}<br>%{{x:.1f}}%<br>OI %{{customdata:,.0f}} ctrs<extra></extra>",
             customdata=sub["oi"],
         ))
@@ -642,9 +647,80 @@ def fed_path(view: TickerView) -> go.Figure:
     _apply_theme(fig, title="Fed path · next FOMC meetings (Kalshi)", height=300)
     fig.update_layout(
         barmode="stack",
-        xaxis_title="Probability (%)",
+        # No x-axis title — bars are obviously probabilities and are labelled
+        # inline; dropping it frees the bottom strip for the legend so the two
+        # never collide. ticksuffix keeps the % read on the axis.
+        xaxis=dict(title=None, range=[0, 100], ticksuffix="%"),
         yaxis_title="",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5, font=dict(size=10)),
-        margin=dict(t=50, b=70, l=110, r=20),
+        # uniformtext hides any segment label that can't fit at 9px instead of
+        # cramming/rotating it — fixes the squeezed "9%" on thin segments.
+        uniformtext=dict(mode="hide", minsize=9),
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center", x=0.5,
+                    font=dict(size=9.5), tracegroupgap=4),
+        margin=dict(t=50, b=52, l=110, r=24),
+    )
+    return fig
+
+
+# ─────────────────────── Dealer gamma (GEX) profile ─────────────────
+
+
+def gex_profile(view: TickerView) -> go.Figure:
+    """Net dealer gamma vs underlying price, shaded green (positive) / red
+    (negative), with the spot and zero-gamma (γ-flip) levels marked.
+
+    Same convention/data as the options-wall γ-flip — recomputed from the
+    snapshot chain so the whole curve can be drawn, not just the crossing.
+    """
+    fig = go.Figure()
+    if view.calls_chain is None or view.puts_chain is None or view.options_wall is None:
+        return _apply_theme(fig, title="GEX — no options chain", height=340)
+
+    from market_predict.transforms.gex import gex_profile as _compute
+
+    expiry = view.options_expiry or str(view.options_wall.expiry)
+    prof = _compute(view.spot, expiry, view.calls_chain, view.puts_chain, view.options_wall.atm_iv)
+    if prof is None:
+        return _apply_theme(fig, title="GEX — no near-spot open interest", height=340)
+
+    xs, ys = prof.spots, prof.net_gex
+    pos = [y if y >= 0 else 0 for y in ys]
+    neg = [y if y < 0 else 0 for y in ys]
+    fig.add_trace(go.Scatter(
+        x=xs, y=pos, fill="tozeroy", mode="none",
+        fillcolor="rgba(39, 174, 96, 0.18)", showlegend=False, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=xs, y=neg, fill="tozeroy", mode="none",
+        fillcolor="rgba(192, 57, 43, 0.18)", showlegend=False, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys, mode="lines",
+        line=dict(color=COLORS["neutral_text"], width=2), name="net dealer γ",
+        hovertemplate="$%{x:.0f}<br>net γ %{y:.2f} $bn / 1%<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_color="rgba(0,0,0,0.4)", line_width=1)
+    fig.add_vline(
+        x=view.spot, line_color=COLORS["spot"], line_dash="solid", line_width=2,
+        annotation_text=f"spot ${view.spot:.0f}", annotation_position="top",
+        annotation_font_size=10, annotation_font_color=COLORS["spot"],
+    )
+    if prof.zero_gamma:
+        fig.add_vline(
+            x=prof.zero_gamma, line_color=COLORS["gamma_flip"], line_dash="dot", line_width=1.5,
+            annotation_text=f"γ-flip ${prof.zero_gamma:.0f}", annotation_position="bottom",
+            annotation_font_size=10, annotation_font_color=COLORS["gamma_flip"],
+        )
+
+    regime = "positive · stabilizing" if prof.total_gex >= 0 else "negative · accelerant"
+    _apply_theme(
+        fig,
+        title=f"Dealer GEX profile · net γ at spot {prof.total_gex:+.2f} $bn/1% · {regime}",
+        height=340,
+    )
+    fig.update_layout(
+        xaxis_title="Underlying price ($)",
+        yaxis_title="Net dealer γ ($bn per 1%)",
+        showlegend=False,
     )
     return fig

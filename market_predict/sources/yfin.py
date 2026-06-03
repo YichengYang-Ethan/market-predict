@@ -91,3 +91,48 @@ def get_futures(symbol: str, name: str) -> Optional[FuturesSnapshot]:
         )
     except Exception:
         return None
+
+
+# ─────────────────── cross-asset risk strip ───────────────────
+
+
+@dataclass
+class CrossAsset:
+    symbol: str
+    name: str
+    last: float
+    chg_1d: float   # percent
+    chg_5d: float   # percent
+
+
+# A compact macro cross-section: rates, credit, USD, gold, oil. Deliberately
+# small (5 names) so a live fetch stays cheap and degrades to [] under throttle.
+CROSS_ASSET_TICKERS: tuple[tuple[str, str], ...] = (
+    ("TLT", "20Y+ UST"),
+    ("HYG", "HY credit"),
+    ("UUP", "US dollar"),
+    ("GLD", "Gold"),
+    ("USO", "Oil"),
+)
+
+
+def get_cross_asset(tickers: tuple[tuple[str, str], ...] | None = None) -> list[CrossAsset]:
+    """1-day and 5-day % returns for a small macro cross-section.
+
+    One history call per name; any failure (throttle, delisting) is skipped so
+    the strip renders with whatever resolved.
+    """
+    out: list[CrossAsset] = []
+    for sym, name in (tickers or CROSS_ASSET_TICKERS):
+        try:
+            close = yf.Ticker(sym).history(period="7d", auto_adjust=False)["Close"].dropna()
+            if len(close) < 2:
+                continue
+            last = float(close.iloc[-1])
+            chg_1d = (last / float(close.iloc[-2]) - 1) * 100
+            ref5 = float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0])
+            chg_5d = (last / ref5 - 1) * 100
+            out.append(CrossAsset(symbol=sym, name=name, last=last, chg_1d=chg_1d, chg_5d=chg_5d))
+        except Exception:
+            continue
+    return out

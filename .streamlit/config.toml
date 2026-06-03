@@ -1,0 +1,14 @@
+# Visual theme — aligned to yichengyang-ethan.github.io.
+# Warm cream canvas, deep-red accent, white cards. The editorial chrome
+# (serif headline, Inter section labels, JetBrains-Mono numbers, callouts,
+# card borders) is layered on via injected CSS in market_predict/ui/app.py.
+[theme]
+base = "light"
+primaryColor = "#c4170c"
+backgroundColor = "#faf9f7"
+secondaryBackgroundColor = "#f5f4f0"
+textColor = "#1a1a1a"
+font = "sans serif"
+
+[server]
+headless = true

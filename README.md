@@ -13,8 +13,11 @@ Single-page market dashboard for **SPY/QQQ traders**. Pulls 18 free public data 
 | Row | Panels | Sources |
 |---|---|---|
 | **Header** | spot · underlying · futures (overnight) · VIX · ATM IV · P/C OI | yfinance · CBOE (ATM IV, P/C OI) |
+| **Today's setup** | one-line synthesis — gamma regime · walls/pin · P/C positioning · vol vs 1m avg · market-implied direction | derived from the panels below (no extra fetch) |
+| **Cross-asset** | rates · credit · USD · gold · oil — 1d / 5d % (TLT · HYG · UUP · GLD · USO) | yfinance |
 | **Row 1** | 3-month K-line + volume · VIX 1m mini | yfinance |
 | **Row 2** | Options walls (call/put OI, max pain, γ flip) · key levels | CBOE delayed quotes |
+| **Dealer gamma (GEX)** | net dealer gamma vs price, shaded by regime (stabilizing/accelerant), γ-flip marked | recomputed from the CBOE chain |
 | **Row 3** | Daily close brackets — **Kalshi + Polymarket overlaid** · today's UP/DOWN binary | Kalshi `KXINX` · Polymarket `closes above` |
 | **Row 4** | FOMC stacked path · Kalshi rate-cuts count · Polymarket next-FOMC outcomes | Kalshi `KXFEDDECISION`, `KXRATECUTCOUNT` · Polymarket |
 | **Tabs** | Monthly one-touch · Yearly distribution + year-max/min · Recession gauge · Mag 7 ranking · 2026 cuts count | Polymarket · Kalshi `KXINXY`, `KXINXMAXY/MINY`, `KXRECSSNBER` · Polymarket `big-tech` |
@@ -143,6 +146,8 @@ See [commit `e2c1141`](https://github.com/YichengYang-Ethan/market-predict/commi
 - **Near-the-money walls**: call/put wall logic restricts to ±8% from spot. Absolute max OI often sits at deep-OTM crash hedges (e.g. SPY $580 puts when spot is $750), which are not tradable inflection points.
 - **Gamma flip**: net dealer GEX (long-calls / short-puts convention) zero-crossing across a 41-point ±10% spot grid. ATM IV used uniformly across strikes — good enough for the flip level, not a full surface.
 - **5-minute `st.cache_data` TTL** keeps the API call budget light. Refresh button clears it.
+- **Today's setup** synthesis ([`transforms/setup.py`](market_predict/transforms/setup.py)) is a deterministic read of fields already on the view — gamma regime vs γ-flip, walls/pin, P/C positioning, VIX vs its 1-month mean, market-implied direction — descriptive, not advice. No extra fetch.
+- **Editorial theme** — warm canvas, Source Serif 4 headlines, Inter labels, JetBrains-Mono numbers, single deep-red accent — aligned to [yichengyang-ethan.github.io](https://yichengyang-ethan.github.io) so the embedded view reads as part of the site rather than a bolted-on app.
 
 ## Layout
 
@@ -156,14 +161,14 @@ See [commit `e2c1141`](https://github.com/YichengYang-Ethan/market-predict/commi
 │ Row 1:  3-month K-line + Volume        │ VIX 1m mini                  │
 │ Row 2:  Options walls (OI bars)        │ Call wall / Put wall / γ flip │
 │ Row 3:  Daily brackets (Kalshi + Poly) │ P(close UP) / P(open UP)     │
+│ + Today's setup · Cross-asset strip · Dealer gamma (GEX) panels        │
 │ Row 4:  FOMC path  │ 2026 cuts (Kalshi) │ Next FOMC (Polymarket)      │
 ├────────────────────────────────────────────────────────────────────────┤
-│ [📊 Show extras]  ← click to reveal the tabs below                    │
-│ [Monthly] [Yearly] [Macro/Recession] [Mag 7] [2026 Cuts]              │
+│ Tabs (all inline):  Monthly · Yearly · Macro/Recession · Mag 7 · 2026 │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Extras are hidden by default so first load lands under ~10 s on free hosting. Click the button to render the additional tabs.
+All tabs render inline — no click-to-reveal gate. On a warm snapshot every panel paints on load. The dashboard also runs **embedded**: `?site=1` strips the in-app header and posts its content height to the host page, so it sits in an auto-height iframe (no inner scroll) on the personal site at [yichengyang-ethan.github.io/market-predict](https://yichengyang-ethan.github.io/market-predict).
 
 Color convention:
 - 🟣 Kalshi data series — purple
